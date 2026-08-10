@@ -1,32 +1,51 @@
 # Cashflow — mobile
 
-A React Native (Expo) client for Cashflow. This is the **foundation**: navigation,
-theme, design system, logging, telemetry, audit, error handling, refresh
-orchestration and eight working screens, all running on a mock data layer.
+A React Native (Expo) client for [Cashflow](https://github.com/BhuvaneswarMarreddy/cashflow-forecast),
+a personal finance app. It reads real balances, imports statements, connects
+banks through Plaid and reviews unexplained credits.
 
-There is no backend connection yet, and that is deliberate — the seam where the
-real API attaches is a single file (`src/data/index.ts`).
+**It computes no money itself.** Firestore stores no balances — an account's
+current balance is derived in memory from its opening anchor plus its
+transactions — so this client asks the server for finished figures rather than
+re-deriving them. A second implementation of that maths would be a second
+opinion about someone's money. Every number arrives as integer cents from a
+callable that runs the *same* `src/lib/**` functions the web app runs.
+
+The mock data layer is still here, behind `ENABLE_MOCK_API` in the developer
+panel: eleven scenarios (empty account, failed refresh, negative balance,
+offline) that real data will not reproduce on demand.
+
+The seam where data comes from is a single file: `src/data/index.ts`.
 
 ## Run it
 
 ```bash
+cp .env.example .env      # fill in the Firebase values
 npm install
-npm start          # then scan the QR code with Expo Go
+npx expo prebuild -p ios  # native project; Plaid, Google sign-in and Face ID are native modules
+npm run ios               # build onto a simulator or a connected device
 ```
 
-Expo Go on a physical phone is the primary loop: edit a file, the bundle
-reloads, look at the phone. No dependency in this project breaks that — see
-[Deferred](#deferred-until-a-development-build) for the two things that would.
+**A development build, not Expo Go.** Plaid Link, Google sign-in,
+`expo-local-authentication` and `expo-document-picker` are native modules, so
+Expo Go cannot load them. `expo-dev-client` is installed, which matters more
+than it sounds: without it the only way the app can find Metro is the LAN
+address frozen into the binary at build time, so a DHCP lease change means a
+rebuild. With it you can type the URL.
+
+On iOS you also need `NSLocalNetworkUsageDescription` (already in `app.json`) —
+without it iOS silently denies the local network and the app never reaches
+Metro at all.
 
 |                                   |                                                       |
 | --------------------------------- | ----------------------------------------------------- |
 | `npm start`                       | Metro + QR code for Expo Go                           |
 | `npm run ios` / `npm run android` | open in a simulator/emulator                          |
 | `npm run verify`                  | typecheck → lint → tests (run this before committing) |
-| `npm test`                        | jest (155 tests)                                      |
+| `npm test`                        | jest (175 tests)                                      |
 | `npm run typecheck`               | `tsc --noEmit`, strict                                |
 | `npm run lint`                    | eslint                                                |
-| `npm run gen:icons`               | regenerate the placeholder brand assets               |
+| `npm run gen:icons`               | regenerate the brand assets from the web app's mark   |
 
 ## On the phone
 

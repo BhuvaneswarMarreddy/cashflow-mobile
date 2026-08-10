@@ -1,0 +1,88 @@
+import { View } from 'react-native';
+
+import { AppText, Card, ProgressBar } from '@/components';
+import { useTheme } from '@/theme';
+import type { SnapshotRunway } from '@/types';
+import { formatCurrency, formatDate } from '@/utils/format';
+
+interface Props {
+  runway: SnapshotRunway;
+  /** Measured monthly burn — what the runway is divided by. */
+  avgMonthlySpendCents: number;
+  onPress?: () => void;
+  testID?: string;
+}
+
+/**
+ * The Home hero: how long the money lasts.
+ *
+ * Chosen over a "safe to spend" figure because the system computes this one and
+ * does not compute that one — see `lib/home.ts` on the server. Serif, alone,
+ * and the only large number on the screen.
+ *
+ * Two rules inherited from the web hero (UI-102), both load-bearing:
+ *
+ *  - **No burn measured, no runway.** There is nothing to divide by, so the
+ *    card says so instead of rendering a confident zero.
+ *  - **The nudge chases the NEXT whole month, not the 5-month target.**
+ *    "6% of your reserve" is a score; "$1,400 buys your first month" is
+ *    something to do this week.
+ */
+export const RunwayHero = ({ runway, avgMonthlySpendCents, onPress, testID }: Props) => {
+  const theme = useTheme();
+
+  const spoken = runway.hasBurn
+    ? `Runway, ${runway.label}. Your money lasts until ${formatDate(runway.date, 'medium')}.`
+    : 'Runway is not measured yet.';
+
+  return (
+    <Card
+      {...(onPress !== undefined ? { onPress, accessibilityLabel: spoken } : {})}
+      {...(onPress !== undefined ? { accessibilityHint: 'Opens what is coming up' } : {})}
+      {...(testID !== undefined ? { testID } : {})}
+      style={{ gap: theme.spacing.sm }}
+    >
+      <AppText variant="sectionHeading" tone="textTertiary">
+        Runway
+      </AppText>
+
+      {!runway.hasBurn ? (
+        <>
+          <AppText variant="heading" tone="textSecondary">
+            Not measured yet
+          </AppText>
+          <AppText variant="caption" tone="textTertiary">
+            Cashflow needs a few months of spending before it can say how long your money lasts.
+          </AppText>
+        </>
+      ) : (
+        <>
+          <AppText variant="display" testID={testID ? `${testID}-value` : undefined}>
+            {runway.label}
+          </AppText>
+
+          <AppText variant="caption" tone="textTertiary">
+            Your cash lasts until {formatDate(runway.date, 'medium')} at{' '}
+            {formatCurrency(avgMonthlySpendCents)} a month
+          </AppText>
+
+          <View style={{ gap: theme.spacing.xs, marginTop: theme.spacing.xs }}>
+            <ProgressBar
+              progress={runway.reserveProgress}
+              label={`Reserve target, ${runway.reserveTargetMonths} months`}
+              tone={runway.reserveProgress >= 1 ? 'positive' : 'accent'}
+            />
+            <AppText
+              variant="caption"
+              tone={runway.reserveProgress >= 1 ? 'positive' : 'textTertiary'}
+            >
+              {runway.nextMonthTarget === 0
+                ? `${runway.reserveTargetMonths}-month reserve reached`
+                : `${formatCurrency(runway.amountToNextMonthCents)} more buys month ${runway.nextMonthTarget} of ${runway.reserveTargetMonths}`}
+            </AppText>
+          </View>
+        </>
+      )}
+    </Card>
+  );
+};

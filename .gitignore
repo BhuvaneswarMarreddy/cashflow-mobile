@@ -39,3 +39,11 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Local Firebase / environment config
+.env
+
+# Firebase native config — regenerate with:
+#   npx firebase apps:sdkconfig IOS <appId> --out GoogleService-Info.plist
+GoogleService-Info.plist
+google-services.json

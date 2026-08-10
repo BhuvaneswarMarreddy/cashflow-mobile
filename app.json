@@ -1,17 +1,28 @@
 {
   "expo": {
-    "name": "cashflow-mobile",
+    "name": "Cashflow",
     "slug": "cashflow-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "scheme": "cashflow",
+    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#101014",
+    "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.marreddy.cashflow",
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "appleTeamId": "TD86T4GJN3",
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "Cashflow loads its JavaScript from the Metro development server on your local network. Release builds do not use the local network.",
+        "NSBonjourServices": ["_expo._tcp", "_http._tcp"]
+      }
     },
     "android": {
+      "package": "com.marreddy.cashflow",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#14161a",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -20,6 +31,35 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-asset",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Cashflow uses Face ID to unlock your balances. Your session stays signed in either way."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon-light.png",
+          "imageWidth": 160,
+          "resizeMode": "contain",
+          "backgroundColor": "#FAF7EF",
+          "dark": {
+            "image": "./assets/splash-icon.png",
+            "backgroundColor": "#101014"
+          }
+        }
+      ],
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.958007946272-omhu1ra8tbajbceai8nrk2q99a8k0rp3"
+        }
+      ]
+    ]
   }
 }

@@ -18,6 +18,7 @@ export type AccountsStackParamList = {
 export type MoreStackParamList = {
   Settings: undefined;
   Diagnostics: undefined;
+  Review: undefined;
 };
 
 export type TabParamList = {

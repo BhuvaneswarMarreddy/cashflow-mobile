@@ -267,6 +267,15 @@ export const SettingsScreen = () => {
             caption="Changes here move every figure in the app, on this phone and on the web."
           />
           <Card padded={false}>
+            <ListRow
+              title="Review unexplained credits"
+              subtitle="Money Cashflow will not call income until you say so"
+              leadingIcon="help-circle"
+              leadingTone="warning"
+              onPress={() => navigation.navigate('Review')}
+              testID="row-review-credits"
+            />
+            <Divider inset={theme.spacing.lg} />
             <SettingSwitch
               label="Count pending transactions"
               description="Include holds your bank has not settled yet"

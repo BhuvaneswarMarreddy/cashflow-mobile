@@ -8,6 +8,7 @@ import { developerToolsAvailable } from '@/config';
 import { AccountDetailScreen } from '@/screens/AccountDetailScreen';
 import { AddAccountScreen } from '@/screens/AddAccountScreen';
 import { ImportCsvScreen } from '@/screens/ImportCsvScreen';
+import { ReviewScreen } from '@/screens/ReviewScreen';
 import { AccountsScreen } from '@/screens/AccountsScreen';
 import { ActivityScreen } from '@/screens/ActivityScreen';
 import { DiagnosticsScreen } from '@/screens/DiagnosticsScreen';
@@ -92,6 +93,13 @@ const MoreNavigator = () => {
           options={{ title: 'Diagnostics' }}
         />
       ) : null}
+      {/* Outside the developer gate: reviewing credits is the product, not a
+          diagnostic. */}
+      <MoreStack.Screen
+        name="Review"
+        component={ReviewScreen}
+        options={{ title: 'Review credits' }}
+      />
     </MoreStack.Navigator>
   );
 };

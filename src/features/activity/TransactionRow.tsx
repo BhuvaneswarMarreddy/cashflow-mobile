@@ -14,9 +14,11 @@ interface Props {
   transaction: Transaction;
   /** Shown when the list mixes accounts. */
   accountName?: string;
+  /** Opens the "always categorize" sheet for this transaction. */
+  onLongPress?: () => void;
 }
 
-export const TransactionRow = ({ transaction, accountName }: Props) => {
+export const TransactionRow = ({ transaction, accountName, onLongPress }: Props) => {
   const subtitleParts = [transaction.category, accountName].filter(Boolean) as string[];
 
   return (
@@ -26,6 +28,7 @@ export const TransactionRow = ({ transaction, accountName }: Props) => {
       {...(transaction.pending ? { footnote: 'Pending' } : {})}
       leadingIcon={ICON_FOR[transaction.kind]}
       leadingTone={transaction.kind === 'fee' ? 'warning' : 'neutral'}
+      {...(onLongPress ? { onLongPress } : {})}
       accessibilityLabel={[
         transaction.merchant ?? transaction.description,
         transaction.category,

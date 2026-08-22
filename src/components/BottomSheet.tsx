@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Animated,
   Easing,
+  KeyboardAvoidingView,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -22,6 +24,8 @@ interface Props {
   onClose: () => void;
   title: string;
   children: ReactNode;
+  /** Pinned below the scrolling body, e.g. a chat input row — never scrolls away. */
+  footer?: ReactNode;
 }
 
 /** Drag further than this and releasing dismisses instead of springing back. */
@@ -46,7 +50,7 @@ const DISMISS_AFTER = 110;
  *  3. **Scrolling body**, with `flexShrink: 1` — without that the ScrollView
  *     keeps its full content height and the cap has no effect at all.
  */
-export const BottomSheet = ({ visible, onClose, title, children }: Props) => {
+export const BottomSheet = ({ visible, onClose, title, children, footer }: Props) => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
@@ -123,8 +127,16 @@ export const BottomSheet = ({ visible, onClose, title, children }: Props) => {
           Nested, its `Pressable` claimed the touch responder before the body's
           ScrollView could, and the list would not scroll at all — a Pressable
           ancestor swallows the pan. Keeping them siblings means a tap outside
-          still dismisses while gestures inside reach the content. */}
-      <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+          still dismisses while gestures inside reach the content.
+
+          KeyboardAvoidingView on the OUTER container, not just around a
+          footer: "padding" shrinks THIS view by the keyboard's height, and
+          because the sheet inside is anchored to `flex-end`, it rides up to
+          sit right above the keyboard rather than being covered by it. */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1, justifyContent: 'flex-end' }}
+      >
         <Pressable
           onPress={onClose}
           accessibilityRole="button"
@@ -179,15 +191,31 @@ export const BottomSheet = ({ visible, onClose, title, children }: Props) => {
             style={{ flexShrink: 1 }}
             contentContainerStyle={{
               paddingHorizontal: theme.spacing.lg,
-              paddingBottom: insets.bottom + theme.spacing.lg,
+              // A footer supplies its own safe-area padding below; without a
+              // footer the scrolling body is the bottom-most thing and needs it.
+              paddingBottom: footer ? theme.spacing.lg : insets.bottom + theme.spacing.lg,
             }}
             showsVerticalScrollIndicator
             keyboardShouldPersistTaps="handled"
           >
             {children}
           </ScrollView>
+
+          {footer ? (
+            <View
+              style={{
+                borderTopWidth: theme.borderWidth.hairline,
+                borderTopColor: theme.colors.border,
+                paddingHorizontal: theme.spacing.lg,
+                paddingTop: theme.spacing.sm,
+                paddingBottom: insets.bottom + theme.spacing.sm,
+              }}
+            >
+              {footer}
+            </View>
+          ) : null}
         </Animated.View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };

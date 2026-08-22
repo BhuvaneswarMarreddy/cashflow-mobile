@@ -1,4 +1,36 @@
-import { accountDocument, type NewAccount } from '../accountsWrite';
+import { doc, setDoc } from '@firebase/firestore';
+
+import { triggerRefresh } from '@/hooks/useRefresh';
+import { firebaseAuth } from '@/services/firebase';
+
+import { accountDocument, setAssumedMonthlySpend, type NewAccount } from '../accountsWrite';
+
+/**
+ * `setAssumedMonthlySpend` mocks the wire, not Firestore — same posture as
+ * `decisions.test.ts` mocking the callable. This asserts the write SHAPE and
+ * the refresh trigger, never re-derives what the server does with it.
+ */
+jest.mock('@firebase/firestore', () => ({
+  collection: jest.fn(),
+  doc: jest.fn(() => ({ path: 'users/u1' })),
+  serverTimestamp: jest.fn(() => 'SERVER_TIME'),
+  setDoc: jest.fn(),
+}));
+
+jest.mock('@/services/firebase', () => ({
+  firebaseAuth: jest.fn(),
+  firestore: jest.fn(() => ({})),
+  isFirebaseConfigured: jest.fn(() => true),
+}));
+
+jest.mock('@/hooks/useRefresh', () => ({
+  triggerRefresh: jest.fn(),
+}));
+
+const mockSetDoc = setDoc as jest.Mock;
+const mockDoc = doc as jest.Mock;
+const mockFirebaseAuth = firebaseAuth as jest.Mock;
+const mockTriggerRefresh = triggerRefresh as jest.Mock;
 
 /**
  * The opening anchor, and the dollars boundary.
@@ -74,5 +106,54 @@ describe('accountDocument', () => {
     expect('lastFourDigits' in doc).toBe(false);
     expect('creditLimit' in doc).toBe(false);
     expect('dueDate' in doc).toBe(false);
+  });
+});
+
+describe('setAssumedMonthlySpend', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockSetDoc.mockResolvedValue(undefined);
+    mockFirebaseAuth.mockReturnValue({ currentUser: { uid: 'u1' } });
+  });
+
+  it('merge-writes the dollars figure under settings.assumedMonthlySpend and refreshes', async () => {
+    await setAssumedMonthlySpend(9000);
+
+    expect(mockDoc).toHaveBeenCalledWith(expect.anything(), 'users', 'u1');
+    expect(mockSetDoc).toHaveBeenCalledWith(
+      expect.anything(),
+      { settings: { assumedMonthlySpend: 9000 } },
+      { merge: true },
+    );
+    expect(mockTriggerRefresh).toHaveBeenCalledWith('tap');
+  });
+
+  it('writes null to clear the assumption, and still refreshes', async () => {
+    await setAssumedMonthlySpend(null);
+
+    expect(mockSetDoc).toHaveBeenCalledWith(
+      expect.anything(),
+      { settings: { assumedMonthlySpend: null } },
+      { merge: true },
+    );
+    expect(mockTriggerRefresh).toHaveBeenCalledWith('tap');
+  });
+
+  it('throws NOT_SIGNED_IN and never writes or refreshes when there is no user', async () => {
+    mockFirebaseAuth.mockReturnValue({ currentUser: null });
+
+    await expect(setAssumedMonthlySpend(9000)).rejects.toMatchObject({ code: 'NOT_SIGNED_IN' });
+    expect(mockSetDoc).not.toHaveBeenCalled();
+    expect(mockTriggerRefresh).not.toHaveBeenCalled();
+  });
+
+  it('wraps a write failure into a retryable AppError and does not refresh', async () => {
+    mockSetDoc.mockRejectedValue(new Error('boom'));
+
+    await expect(setAssumedMonthlySpend(9000)).rejects.toMatchObject({
+      code: 'ASSUMED_SPEND_WRITE_FAILED',
+      retryable: true,
+    });
+    expect(mockTriggerRefresh).not.toHaveBeenCalled();
   });
 });

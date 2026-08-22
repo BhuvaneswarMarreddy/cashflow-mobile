@@ -1,6 +1,7 @@
 import { collection, doc, serverTimestamp, setDoc } from '@firebase/firestore';
 
 import { AppError } from '@/errors';
+import { triggerRefresh } from '@/hooks/useRefresh';
 import { loggerFor } from '@/logging';
 import { firebaseAuth, firestore, isFirebaseConfigured } from '@/services/firebase';
 import type { AccountKind } from '@/types';
@@ -192,6 +193,57 @@ export const setIncludePending = async (include: boolean): Promise<void> => {
       category: 'data',
       code: 'PENDING_POLICY_WRITE_FAILED',
       userMessage: "Cashflow couldn't save that setting.",
+      technicalMessage: (error as { message?: string })?.message ?? 'setDoc failed',
+      retryable: true,
+      cause: error,
+    });
+  }
+};
+
+/**
+ * CHAT-SPEND-001 — the owner's stated monthly-spend assumption, for runway.
+ *
+ * Same shape and posture as `setIncludePending`: one field, merge-written,
+ * `firestore.rules` already covers the owner's own user document. `null`
+ * clears the override — chosen over `deleteField()` because the server reads
+ * this field as "absent or null means no override" either way, and a plain
+ * `null` is one fewer import. DOLLARS, matching how the web app stores it;
+ * the phone's cents convention only starts at the snapshot read boundary
+ * (`firebaseRepositories.ts`).
+ *
+ * Unlike `setIncludePending` (whose caller decides when to refresh), this
+ * calls `triggerRefresh` itself — the same posture as `decisions.ts`, because
+ * chat is a fire-and-forget write with no screen-level refresh of its own.
+ */
+export const setAssumedMonthlySpend = async (dollars: number | null): Promise<void> => {
+  const uid = firebaseAuth().currentUser?.uid;
+  if (!uid) {
+    throw new AppError({
+      category: 'authentication',
+      code: 'NOT_SIGNED_IN',
+      userMessage: 'Sign in again to change this.',
+      technicalMessage: 'setAssumedMonthlySpend called with no Firebase user',
+      retryable: false,
+    });
+  }
+
+  try {
+    await setDoc(
+      doc(firestore(), 'users', uid),
+      { settings: { assumedMonthlySpend: dollars } },
+      { merge: true },
+    );
+    // Whether an assumption is set, never the figure — a spend amount must not reach a log.
+    log.info('settings.assumed_monthly_spend_changed', { metadata: { set: dollars !== null } });
+    triggerRefresh('tap');
+  } catch (error) {
+    log.warn('settings.assumed_monthly_spend_failed', {
+      metadata: { code: (error as { code?: string })?.code ?? 'unknown' },
+    });
+    throw new AppError({
+      category: 'data',
+      code: 'ASSUMED_SPEND_WRITE_FAILED',
+      userMessage: "Cashflow couldn't save that assumption.",
       technicalMessage: (error as { message?: string })?.message ?? 'setDoc failed',
       retryable: true,
       cause: error,

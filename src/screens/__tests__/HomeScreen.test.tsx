@@ -110,6 +110,22 @@ describe('HomeScreen', () => {
     expect(getByText('Try again')).toBeTruthy();
   });
 
+  it('says nothing about an assumption when the monthly figure is measured', async () => {
+    loaded();
+    const { getByTestId } = await renderHome();
+    expect(getByTestId('metric-runway')).not.toHaveTextContent('your assumption', { exact: false });
+  });
+
+  it('marks the monthly figure as the owner\'s own assumption when one is set', async () => {
+    loaded();
+    useFinanceStore.setState({
+      snapshot: { ...data.snapshot, assumedMonthlySpendCents: 900_000 },
+    });
+
+    const { getByTestId } = await renderHome();
+    expect(getByTestId('metric-runway')).toHaveTextContent('your assumption', { exact: false });
+  });
+
   it('never prints an unmeasured runway as zero days', async () => {
     loaded();
     useFinanceStore.setState({

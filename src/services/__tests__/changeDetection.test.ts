@@ -23,6 +23,7 @@ const snapshot = (overrides: Partial<FinancialSnapshot> = {}): FinancialSnapshot
   lockedMonthlyCents: 257_514,
   avgMonthlySpendCents: 420_000,
   avgMonthlyIncomeCents: 520_000,
+  assumedMonthlySpendCents: null,
   lastBankSyncAt: null,
   includePending: false,
   nextPaycheck: null,

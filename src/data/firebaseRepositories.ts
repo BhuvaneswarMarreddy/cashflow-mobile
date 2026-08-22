@@ -34,12 +34,28 @@ const log = loggerFor('data');
 /** Exactly the payload `functions/src/snapshot.ts` returns. */
 interface SnapshotPayload {
   generatedAt: string;
-  snapshot: Omit<FinancialSnapshot, 'generatedAt'>;
+  // `assumedMonthlySpendCents` is populated below, from the server's nested
+  // `snapshot.assumedMonthlySpend` — never sent pre-converted, same reason
+  // `generatedAt` is excluded.
+  snapshot: Omit<FinancialSnapshot, 'generatedAt' | 'assumedMonthlySpendCents'> & {
+    /**
+     * CHAT-SPEND-001 / FIN-SPEND-001: `settings.assumedMonthlySpend`, in
+     * DOLLARS — the one exception to this payload's integer-cents convention,
+     * because it is a pass-through of the raw settings value, not a derived
+     * figure. The server nests it inside `snapshot` beside `includePending`
+     * (both are policy fields the figures were derived under). Converted to
+     * cents once below, the same boundary `accountsWrite.ts`'s `toDollars`
+     * mirrors in reverse.
+     */
+    assumedMonthlySpend: number | null;
+  };
   accounts: Account[];
   upcoming: UpcomingPayment[];
   goals: SavingsGoal[];
   activity: Transaction[];
 }
+
+const toCents = (dollars: number): number => Math.round(dollars * 100);
 
 /**
  * One refresh makes one network call.
@@ -168,7 +184,14 @@ export const createFirebaseRepositories = (): Repositories => ({
       const previous = useFinanceStore.getState().snapshot;
       const payload = await fetchSnapshot();
       return {
-        snapshot: { ...payload.snapshot, generatedAt: payload.generatedAt },
+        snapshot: {
+          ...payload.snapshot,
+          generatedAt: payload.generatedAt,
+          assumedMonthlySpendCents:
+            payload.snapshot.assumedMonthlySpend !== null
+              ? toCents(payload.snapshot.assumedMonthlySpend)
+              : null,
+        },
         // The server keeps no history, so "previous" is the last figure THIS
         // session held. On a cold start there is none and change detection
         // correctly reports nothing rather than inventing a delta.

@@ -2,10 +2,9 @@ import { useState } from 'react';
 import { View } from 'react-native';
 
 import { usageAnalytics } from '@/analytics';
-import { FAB, type FabAction } from '@/components';
+import { AppScreen } from '@/components';
 import { FlowView } from '@/features/activity/FlowView';
 import { TransactionsList } from '@/features/activity/TransactionsList';
-import { ChatSheet } from '@/features/chat/ChatSheet';
 import { SegmentedControl } from '@/features/settings/SegmentedControl';
 import { useTheme } from '@/theme';
 
@@ -27,24 +26,21 @@ const TABS: { value: ActivityTab; label: string }[] = [
  * `react-native-pager-view`, a native module and therefore a rebuild, to buy a
  * swipe gesture between two tabs. This control already exists and already
  * announces itself as a radio group to VoiceOver.
+ *
+ * `AppScreen` with `scroll={false}`: Activity has no actions of its own
+ * (the FAB here is only ever the standing "Ask Cashflow" AppScreen appends),
+ * and each tab's content — `TransactionsList`, `FlowView` — owns its own
+ * `StatusBanner`, scrolling and pull-to-refresh already, so wrapping them in
+ * AppScreen's `ScrollView` would nest two scroll regions and break both.
  */
 export const ActivityScreen = () => {
   const theme = useTheme();
   const [tab, setTab] = useState<ActivityTab>('transactions');
-  const [chatOpen, setChatOpen] = useState(false);
-
-  const fabActions: FabAction[] = [
-    {
-      key: 'ask-cashflow',
-      label: 'Ask Cashflow',
-      description: 'Ask a question, or drop in a screenshot',
-      icon: 'message-circle',
-      onPress: () => setChatOpen(true),
-    },
-  ];
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
+    // No testID here: TransactionsList's own root already carries
+    // `screen-activity` for the navigator suite (see its doc comment).
+    <AppScreen scroll={false} padded={false} fabSource="activity">
       <View
         style={{
           paddingHorizontal: theme.spacing.lg,
@@ -67,12 +63,6 @@ export const ActivityScreen = () => {
           keeping it mounted behind Flow would hold its whole render window in
           memory for a tab nobody is looking at. */}
       {tab === 'transactions' ? <TransactionsList /> : <FlowView />}
-
-      {/* Not AppScreen here — Activity owns a custom two-tab layout, not a
-          single scroll region, so the FAB is mounted directly the same way
-          AppScreen mounts it internally. */}
-      <FAB actions={fabActions} source="activity" />
-      <ChatSheet visible={chatOpen} onClose={() => setChatOpen(false)} />
-    </View>
+    </AppScreen>
   );
 };

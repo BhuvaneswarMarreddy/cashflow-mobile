@@ -32,25 +32,23 @@ beforeEach(() => {
 });
 
 /**
- * Activity's FAB carries exactly one action ("Ask Cashflow"), so — unlike
- * HomeScreen's three-action FAB — it fires directly on press rather than
- * opening the "Quick actions" picker sheet first (see FAB.tsx: `single`).
- * This is the untested path the review flagged: prove the direct-fire wiring
- * actually opens ChatSheet, not just that the button renders.
+ * Activity has no actions of its own — its FAB carries only the standing
+ * "Ask Cashflow" action AppScreen appends (see AppScreen.tsx, FAB.tsx). Even
+ * one action still fans out from the "Quick actions" toggle rather than
+ * firing directly — the speed-dial's one gesture, everywhere.
  */
 describe('ActivityScreen', () => {
-  it('renders with the "Ask Cashflow" FAB present', async () => {
+  it('renders with the FAB toggle present', async () => {
     const { getByLabelText } = await renderActivity();
-    expect(getByLabelText('Ask Cashflow')).toBeTruthy();
+    expect(getByLabelText('Quick actions')).toBeTruthy();
   });
 
-  it('pressing the FAB opens the chat sheet directly, no picker sheet', async () => {
-    const { getByLabelText, getByTestId, queryByText } = await renderActivity();
+  it('opens the chat sheet from the fanned-out "Ask Cashflow" mini button', async () => {
+    const { getByLabelText, getByTestId } = await renderActivity();
 
-    await fireEvent.press(getByLabelText('Ask Cashflow'));
+    await fireEvent.press(getByLabelText('Quick actions'));
+    await fireEvent.press(getByTestId('fab-action-ask-ai'));
 
     await waitFor(() => expect(getByTestId('chat-input')).toBeTruthy());
-    // Direct fire, not the multi-action picker: "Quick actions" never appears.
-    expect(queryByText('Quick actions')).toBeNull();
   });
 });

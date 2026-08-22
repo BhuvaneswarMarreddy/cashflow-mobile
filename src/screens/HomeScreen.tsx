@@ -1,6 +1,5 @@
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useState } from 'react';
 import { View } from 'react-native';
 
 import { usageAnalytics } from '@/analytics';
@@ -18,7 +17,6 @@ import {
   StatusBanner,
   type FabAction,
 } from '@/components';
-import { ChatSheet } from '@/features/chat/ChatSheet';
 import { ChangeList } from '@/features/home/ChangeList';
 import { RunwayHero } from '@/features/home/RunwayHero';
 import { usePullToRefresh, triggerRefresh } from '@/hooks/useRefresh';
@@ -56,8 +54,6 @@ export const HomeScreen = () => {
   const hasLoadedOnce = useFinanceStore((state) => state.hasLoadedOnce);
   const accounts = useFinanceStore((state) => state.accounts);
 
-  const [chatOpen, setChatOpen] = useState(false);
-
   const fabActions: FabAction[] = [
     {
       key: 'refresh',
@@ -77,13 +73,6 @@ export const HomeScreen = () => {
           outcome: 'cancelled',
         }),
     },
-    {
-      key: 'ask-cashflow',
-      label: 'Ask Cashflow',
-      description: 'Ask a question, or drop in a screenshot',
-      icon: 'message-circle',
-      onPress: () => setChatOpen(true),
-    },
   ];
 
   const delta = (current: number | undefined, before: number | undefined): number | null =>
@@ -98,7 +87,6 @@ export const HomeScreen = () => {
       banner={<StatusBanner />}
       testID="screen-home"
     >
-      <ChatSheet visible={chatOpen} onClose={() => setChatOpen(false)} />
       {!hasLoadedOnce && status === 'refreshing' ? (
         <View style={{ gap: theme.spacing.lg }}>
           <SkeletonCard lines={4} />

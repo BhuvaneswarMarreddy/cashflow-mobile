@@ -1,5 +1,6 @@
 import { doc, setDoc } from '@firebase/firestore';
 
+import { CATEGORIES } from '@/features/activity/categories';
 import { triggerRefresh } from '@/hooks/useRefresh';
 import { firebaseAuth } from '@/services/firebase';
 import { useFinanceStore } from '@/store/financeStore';
@@ -7,8 +8,10 @@ import type { Account } from '@/types';
 
 import {
   accountDocument,
+  addCategory,
   billDocument,
   createBill,
+  renameCategory,
   resolvePaymentMethodId,
   setAssumedMonthlySpend,
   type NewAccount,
@@ -327,6 +330,189 @@ describe('createBill', () => {
 
     await expect(createBill(input)).rejects.toMatchObject({
       code: 'BILL_CREATE_FAILED',
+      retryable: true,
+    });
+    expect(mockTriggerRefresh).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * cashflow-mobile#24. Same write target as `setAssumedMonthlySpend`
+ * (`users/{uid}.settings`, merge) — the shape the server's `resolveCategories()`
+ * reads (cashflow-forecast `src/types/index.ts`). `homeSnapshot` only ever
+ * hands back the RESOLVED list, never the raw `settings.categories` array —
+ * these tests pin that reconstruction (`customCategoriesOf`) alongside the
+ * write shape itself.
+ */
+describe('addCategory', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockSetDoc.mockResolvedValue(undefined);
+    mockFirebaseAuth.mockReturnValue({ currentUser: { uid: 'u1' } });
+    // A LOADED set with no customs — what the server sends an owner who has
+    // never added one. Distinct from `[]`, which means "not loaded yet".
+    useFinanceStore.setState({ categories: CATEGORIES.map((c) => ({ ...c })) });
+  });
+
+  /**
+   * The store's category list is mobile's only copy of the owner's customs;
+   * an empty one means the snapshot has not landed yet. Writing then would
+   * replace the whole array with just the new entry and delete every category
+   * made on web — silently, under a "Saved" message.
+   */
+  it('refuses to write before the first snapshot has populated categories', async () => {
+    useFinanceStore.setState({ categories: [] });
+
+    await expect(addCategory('Vacations')).rejects.toMatchObject({
+      code: 'CATEGORIES_NOT_LOADED',
+      retryable: true,
+    });
+    expect(mockSetDoc).not.toHaveBeenCalled();
+  });
+
+  it('merge-writes a fresh slug under settings.categories and refreshes, returning the slug', async () => {
+    const value = await addCategory('Vacations');
+
+    expect(value).toBe('vacations');
+    expect(mockDoc).toHaveBeenCalledWith(expect.anything(), 'users', 'u1');
+    expect(mockSetDoc).toHaveBeenCalledWith(
+      expect.anything(),
+      { settings: { categories: [{ value: 'vacations', label: 'Vacations' }] } },
+      { merge: true },
+    );
+    expect(mockTriggerRefresh).toHaveBeenCalledWith('tap');
+  });
+
+  it('includes the icon only when one is given', async () => {
+    await addCategory('Vacations', '🏖️');
+
+    expect(mockSetDoc).toHaveBeenCalledWith(
+      expect.anything(),
+      { settings: { categories: [{ value: 'vacations', label: 'Vacations', icon: '🏖️' }] } },
+      { merge: true },
+    );
+  });
+
+  it('reconstructs the existing custom entries from the RESOLVED store set, never re-adding a default', async () => {
+    useFinanceStore.setState({
+      categories: [...CATEGORIES, { value: 'vacations', label: 'Vacations', icon: '🏖️' }],
+    });
+
+    await addCategory('Home Repairs');
+
+    expect(mockSetDoc).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        settings: {
+          categories: [
+            { value: 'vacations', label: 'Vacations', icon: '🏖️' },
+            { value: 'home-repairs', label: 'Home Repairs' },
+          ],
+        },
+      },
+      { merge: true },
+    );
+  });
+
+  it('collision-suffixes a label that slugs the same as an existing custom category', async () => {
+    useFinanceStore.setState({
+      categories: [...CATEGORIES, { value: 'vacations', label: 'Vacations' }],
+    });
+
+    const value = await addCategory('Vacations!!');
+
+    expect(value).toBe('vacations-2');
+  });
+
+  it('throws NOT_SIGNED_IN and never writes or refreshes when there is no user', async () => {
+    mockFirebaseAuth.mockReturnValue({ currentUser: null });
+
+    await expect(addCategory('Vacations')).rejects.toMatchObject({ code: 'NOT_SIGNED_IN' });
+    expect(mockSetDoc).not.toHaveBeenCalled();
+    expect(mockTriggerRefresh).not.toHaveBeenCalled();
+  });
+
+  it('wraps a write failure into a retryable AppError and does not refresh', async () => {
+    mockSetDoc.mockRejectedValue(new Error('boom'));
+
+    await expect(addCategory('Vacations')).rejects.toMatchObject({
+      code: 'CATEGORY_WRITE_FAILED',
+      retryable: true,
+    });
+    expect(mockTriggerRefresh).not.toHaveBeenCalled();
+  });
+});
+
+describe('renameCategory', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockSetDoc.mockResolvedValue(undefined);
+    mockFirebaseAuth.mockReturnValue({ currentUser: { uid: 'u1' } });
+    useFinanceStore.setState({
+      categories: [...CATEGORIES, { value: 'vacations', label: 'Vacations', icon: '🏖️' }],
+    });
+  });
+
+  /** Same cold-start hazard as addCategory: an empty store is "not loaded". */
+  it('refuses to write before the first snapshot has populated categories', async () => {
+    useFinanceStore.setState({ categories: [] });
+
+    await expect(renameCategory('vacations', 'Trips')).rejects.toMatchObject({
+      code: 'CATEGORIES_NOT_LOADED',
+      retryable: true,
+    });
+    expect(mockSetDoc).not.toHaveBeenCalled();
+  });
+
+  it('changes only the label of the matching custom entry, preserving its icon', async () => {
+    await renameCategory('vacations', 'Trips');
+
+    expect(mockSetDoc).toHaveBeenCalledWith(
+      expect.anything(),
+      { settings: { categories: [{ value: 'vacations', label: 'Trips', icon: '🏖️' }] } },
+      { merge: true },
+    );
+    expect(mockTriggerRefresh).toHaveBeenCalledWith('tap');
+  });
+
+  it('leaves every other custom entry untouched', async () => {
+    useFinanceStore.setState({
+      categories: [
+        ...CATEGORIES,
+        { value: 'vacations', label: 'Vacations' },
+        { value: 'home-repairs', label: 'Home Repairs' },
+      ],
+    });
+
+    await renameCategory('vacations', 'Trips');
+
+    expect(mockSetDoc).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        settings: {
+          categories: [
+            { value: 'vacations', label: 'Trips' },
+            { value: 'home-repairs', label: 'Home Repairs' },
+          ],
+        },
+      },
+      { merge: true },
+    );
+  });
+
+  it('throws NOT_SIGNED_IN and never writes or refreshes when there is no user', async () => {
+    mockFirebaseAuth.mockReturnValue({ currentUser: null });
+
+    await expect(renameCategory('vacations', 'Trips')).rejects.toMatchObject({ code: 'NOT_SIGNED_IN' });
+    expect(mockSetDoc).not.toHaveBeenCalled();
+    expect(mockTriggerRefresh).not.toHaveBeenCalled();
+  });
+
+  it('wraps a write failure into a retryable AppError and does not refresh', async () => {
+    mockSetDoc.mockRejectedValue(new Error('boom'));
+
+    await expect(renameCategory('vacations', 'Trips')).rejects.toMatchObject({
+      code: 'CATEGORY_WRITE_FAILED',
       retryable: true,
     });
     expect(mockTriggerRefresh).not.toHaveBeenCalled();

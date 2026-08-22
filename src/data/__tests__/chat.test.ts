@@ -52,7 +52,7 @@ const txn = (partial: Partial<Transaction> & { id: string }): Transaction => ({
 beforeEach(() => {
   jest.clearAllMocks();
   mockIsFirebaseConfigured.mockReturnValue(true);
-  useFinanceStore.setState({ accounts: [], transactions: [], bills: [], upcoming: [] });
+  useFinanceStore.setState({ accounts: [], transactions: [], bills: [], upcoming: [], categories: [] });
 });
 
 describe('parseChatAction', () => {
@@ -195,6 +195,248 @@ describe('parseChatAction', () => {
    * The parser already handles every one of these correctly — these pin that
    * behaviour so a future change can't regress it silently.
    */
+  /**
+   * cashflow-mobile#24. Mirrors the server's own parser matrix
+   * (cashflow-forecast `src/__tests__/chat-actions.test.ts`) for the three
+   * category verbs — same bounds, same closed-set checks against the
+   * OWNER'S resolved set, never the 13 hardcoded defaults.
+   */
+  describe('cashflow-mobile#24: category verbs', () => {
+    const ownerCategories = [
+      ...CATEGORIES,
+      { value: 'vacations', label: 'Vacations', icon: '🏖️' },
+      { value: 'old-hobby', label: 'Old Hobby', icon: '🎨', archived: true },
+    ];
+
+    describe('add_category', () => {
+      const valid = { action: 'add_category', label: 'Vacations', reason: 'You asked to track vacations.' };
+
+      it('accepts a minimal valid action', () => {
+        expect(parseChatAction(valid)).toEqual(valid);
+      });
+
+      it('accepts an icon alongside the label', () => {
+        const raw = { ...valid, icon: '🏖️' };
+        expect(parseChatAction(raw)).toEqual(raw);
+      });
+
+      it('rejects a missing or empty label', () => {
+        const { label: _label, ...noLabel } = valid;
+        expect(parseChatAction(noLabel)).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+        expect(parseChatAction({ ...valid, label: '   ' })).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+      });
+
+      it('rejects a label over the 40-char bound, accepts it at the bound', () => {
+        expect(parseChatAction({ ...valid, label: 'A'.repeat(41) })).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+        expect(parseChatAction({ ...valid, label: 'A'.repeat(40) })).toMatchObject({
+          action: 'add_category',
+        });
+      });
+
+      it('rejects an icon over the 4-char bound, or present but empty', () => {
+        expect(parseChatAction({ ...valid, icon: 'A'.repeat(5) })).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+        expect(parseChatAction({ ...valid, icon: '' })).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+        expect(parseChatAction({ ...valid, icon: 'AAAA' })).toMatchObject({ action: 'add_category' });
+      });
+
+      it('rejects a missing or empty reason', () => {
+        expect(parseChatAction({ action: 'add_category', label: 'Vacations' })).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+        expect(parseChatAction({ ...valid, reason: '' })).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+      });
+
+      it('rejects unknown top-level keys, never accepting a model-picked value', () => {
+        expect(parseChatAction({ ...valid, value: 'vacations' })).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+      });
+
+      it('needs no owner categories context — add_category never checks against one', () => {
+        expect(parseChatAction(valid, [])).toEqual(valid);
+      });
+    });
+
+    describe('rename_category', () => {
+      const valid = {
+        action: 'rename_category',
+        value: 'vacations',
+        label: 'Trips',
+        reason: 'You asked to rename it.',
+      };
+
+      it('accepts a valid action against the owner\'s resolved set', () => {
+        expect(parseChatAction(valid, ownerCategories)).toEqual(valid);
+      });
+
+      it('rejects with no owner categories context', () => {
+        expect(parseChatAction(valid)).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+      });
+
+      it('rejects a value the owner does not have', () => {
+        expect(parseChatAction({ ...valid, value: 'not-a-real-one' }, ownerCategories)).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+      });
+
+      it('rejects a built-in default — only a CUSTOM category can be renamed', () => {
+        expect(parseChatAction({ ...valid, value: 'food' }, ownerCategories)).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+      });
+
+      it('accepts renaming an already-archived custom category', () => {
+        expect(parseChatAction({ ...valid, value: 'old-hobby' }, ownerCategories)).toEqual({
+          ...valid,
+          value: 'old-hobby',
+        });
+      });
+
+      it('rejects a missing or empty label', () => {
+        expect(parseChatAction({ ...valid, label: '' }, ownerCategories)).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+      });
+
+      it('rejects a missing or empty reason', () => {
+        expect(parseChatAction({ ...valid, reason: '' }, ownerCategories)).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+      });
+
+      it('rejects unknown top-level keys', () => {
+        expect(parseChatAction({ ...valid, icon: '🏖️' }, ownerCategories)).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+      });
+    });
+
+    describe('remove_category', () => {
+      const valid = {
+        action: 'remove_category',
+        value: 'vacations',
+        reason: 'You asked to remove it.',
+      };
+
+      it('accepts a valid action, defaulting reassignTo to "other"', () => {
+        expect(parseChatAction(valid, ownerCategories)).toEqual({ ...valid, reassignTo: 'other' });
+      });
+
+      it('accepts an explicit reassignTo', () => {
+        const raw = { ...valid, reassignTo: 'shopping' };
+        expect(parseChatAction(raw, ownerCategories)).toEqual(raw);
+      });
+
+      it('rejects with no owner categories context', () => {
+        expect(parseChatAction(valid)).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+      });
+
+      it('rejects a value the owner does not have', () => {
+        expect(parseChatAction({ ...valid, value: 'not-a-real-one' }, ownerCategories)).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+      });
+
+      it('rejects a built-in default — only a CUSTOM category can be removed', () => {
+        expect(parseChatAction({ ...valid, value: 'food' }, ownerCategories)).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+      });
+
+      it('rejects reassigning to the value being removed', () => {
+        expect(parseChatAction({ ...valid, reassignTo: 'vacations' }, ownerCategories)).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+      });
+
+      it('rejects reassigning to a category the owner does not have', () => {
+        expect(parseChatAction({ ...valid, reassignTo: 'not-a-real-one' }, ownerCategories)).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+      });
+
+      it('rejects reassigning to an archived category', () => {
+        expect(parseChatAction({ ...valid, reassignTo: 'old-hobby' }, ownerCategories)).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+      });
+
+      it('rejects a missing or empty reason', () => {
+        expect(parseChatAction({ ...valid, reason: '' }, ownerCategories)).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+      });
+
+      it('rejects unknown top-level keys', () => {
+        expect(parseChatAction({ ...valid, label: 'x' }, ownerCategories)).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+      });
+    });
+
+    describe('create_rule against the owner\'s resolved set', () => {
+      it('accepts a custom category once it is in the owner\'s resolved set', () => {
+        const raw = {
+          action: 'create_rule',
+          rule: { match: { field: 'merchant', op: 'equals', value: 'Delta' }, set: { category: 'vacations' } },
+          explanation: 'e',
+        };
+        expect(parseChatAction(raw)).toEqual({
+          action: 'answer',
+          explanation: 'e',
+        });
+        expect(parseChatAction(raw, ownerCategories)).toMatchObject({ action: 'create_rule' });
+      });
+
+      it('rejects an archived category — never assignable to a new rule', () => {
+        const raw = {
+          action: 'create_rule',
+          rule: { match: { field: 'merchant', op: 'equals', value: 'X' }, set: { category: 'old-hobby' } },
+          explanation: 'e',
+        };
+        expect(parseChatAction(raw, ownerCategories)).toEqual({ action: 'answer', explanation: 'e' });
+      });
+    });
+  });
+
   describe('record_bill server parity', () => {
     const base = {
       action: 'record_bill',
@@ -641,6 +883,47 @@ describe('sendChatTurn', () => {
       },
     });
     expect(result).toEqual({ action: 'answer', explanation: 'hi' });
+  });
+
+  it('cashflow-mobile#24: sends the owner\'s custom categories, ASSIGNABLE only (archived excluded)', async () => {
+    useFinanceStore.setState({
+      accounts: [],
+      transactions: [],
+      categories: [
+        ...CATEGORIES,
+        { value: 'vacations', label: 'Vacations', icon: '🏖️' },
+        { value: 'old-hobby', label: 'Old Hobby', icon: '🎨', archived: true },
+      ],
+    });
+    const callable = jest
+      .fn()
+      .mockResolvedValue({ data: { success: true, result: { action: 'answer', explanation: 'ok' } } });
+    mockHttpsCallable.mockReturnValue(callable);
+
+    await sendChatTurn({ message: 'what are my categories?', history: [] });
+
+    const sent = callable.mock.calls[0][0];
+    expect(sent.context.categories).toContain('vacations');
+    expect(sent.context.categories).not.toContain('old-hobby');
+  });
+
+  it('cashflow-mobile#24: parses the result against the owner\'s resolved categories, not just the defaults', async () => {
+    useFinanceStore.setState({
+      accounts: [],
+      transactions: [],
+      categories: [...CATEGORIES, { value: 'vacations', label: 'Vacations', icon: '🏖️' }],
+    });
+    const callable = jest.fn().mockResolvedValue({
+      data: {
+        success: true,
+        result: { action: 'add_category', label: 'Staycations', reason: 'r' },
+      },
+    });
+    mockHttpsCallable.mockReturnValue(callable);
+
+    const result = await sendChatTurn({ message: 'add a category', history: [] });
+
+    expect(result).toEqual({ action: 'add_category', label: 'Staycations', reason: 'r' });
   });
 
   it('caps recent transactions at 20, taking the most recent (front of the array)', async () => {

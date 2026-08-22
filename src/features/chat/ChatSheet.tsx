@@ -4,11 +4,12 @@ import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 
 import { AppText, BottomSheet, Button, Card, IconButton, ListRow } from '@/components';
-import { createBill, setAssumedMonthlySpend } from '@/data/accountsWrite';
+import { addCategory, createBill, renameCategory, setAssumedMonthlySpend } from '@/data/accountsWrite';
 import { resolveBillAnchor, sendChatTurn, type ChatAction, type ChatMessage } from '@/data/chat';
 import { applyMerchantRule, undoDecision, type ApplyDecisionResult } from '@/data/decisions';
 import { isAppError } from '@/errors';
-import { CATEGORIES } from '@/features/activity/categories';
+import { resolveCategories, type CategoryOption } from '@/features/activity/categories';
+import { useFinanceStore } from '@/store/financeStore';
 import { useTheme } from '@/theme';
 import type { Theme } from '@/theme';
 import type { BillFrequency } from '@/types';
@@ -51,6 +52,24 @@ type BillProposalState =
   | { phase: 'applied' }
   | { phase: 'dismissed' };
 
+/**
+ * cashflow-mobile#24. `add_category`/`rename_category` only — `remove_category`
+ * never reaches this state machine at all (see `runTurn`'s handling of it): it
+ * has no write mobile can honestly perform, so it renders as plain text
+ * instead of a card. Same "no undo" shape as `BillProposalState` — neither
+ * add nor rename has a server-side Undo verb.
+ */
+type CategoryProposal =
+  | { kind: 'add'; label: string; icon?: string }
+  | { kind: 'rename'; value: string; label: string };
+
+type CategoryProposalState =
+  | { phase: 'pending' }
+  | { phase: 'applying' }
+  | { phase: 'error'; message: string }
+  | { phase: 'applied' }
+  | { phase: 'dismissed' };
+
 // Headroom under the server's 10MB request cap (see task-chat-brief.md).
 const MAX_IMAGE_BYTES = 9 * 1024 * 1024;
 
@@ -83,26 +102,52 @@ type Entry =
       nonNegotiable?: boolean;
       reason: string;
       state: BillProposalState;
-    };
+    }
+  | { id: string; kind: 'category-proposal'; category: CategoryProposal; reason: string; state: CategoryProposalState };
 
 type Turn = { message: string; history: ChatMessage[]; image?: { base64: string; mimeType: string } };
 
-const categoryLabel = (value: string): string =>
-  CATEGORIES.find((category) => category.value === value)?.label ?? value;
+const categoryLabel = (categories: readonly CategoryOption[], value: string): string =>
+  categories.find((category) => category.value === value)?.label ?? value;
 
 /** What the rule's `set` half reads as, picking whichever key is present. */
-const setDescription = (set: ProposalRule['set']): string => {
-  if (set.category) return `category to ${categoryLabel(set.category)}`;
+const setDescription = (categories: readonly CategoryOption[], set: ProposalRule['set']): string => {
+  if (set.category) return `category to ${categoryLabel(categories, set.category)}`;
   if (set.sourceCategory) return `source category to ${set.sourceCategory}`;
   if (set.type) return `type to ${set.type}`;
   if (set.merchant) return `merchant to ${set.merchant}`;
   return 'a rule';
 };
 
-const describeRule = (rule: ProposalRule): string => {
+const describeRule = (categories: readonly CategoryOption[], rule: ProposalRule): string => {
   const verb = rule.match.op === 'contains' ? 'contains' : 'is';
-  return `When ${rule.match.field} ${verb} "${rule.match.value}", set ${setDescription(rule.set)}.`;
+  return `When ${rule.match.field} ${verb} "${rule.match.value}", set ${setDescription(categories, rule.set)}.`;
 };
+
+/** cashflow-mobile#24: the add/rename proposal card's headline. */
+const describeCategoryProposal = (
+  categories: readonly CategoryOption[],
+  category: CategoryProposal,
+): string =>
+  category.kind === 'add'
+    ? `Add "${category.label}" as a category${category.icon ? ` ${category.icon}` : ''}`
+    : `Rename "${categoryLabel(categories, category.value)}" to "${category.label}"`;
+
+/** Same "Saved — …" idiom as `describeBillApplied`/`describeSpendApplied`. */
+const describeCategoryApplied = (category: CategoryProposal): string =>
+  category.kind === 'add'
+    ? `Saved — added "${category.label}" as a category.`
+    : `Saved — renamed to "${category.label}".`;
+
+/**
+ * cashflow-mobile#24: remove_category. Mobile has no write path to reassign
+ * transactions, rules and bills off the removed category (see
+ * `accountsWrite.ts`'s doc comment), so this is never offered as a card —
+ * only an honest explanation, naming the category by its resolved label.
+ */
+const describeCategoryRemoval = (categories: readonly CategoryOption[], value: string): string =>
+  `Removing "${categoryLabel(categories, value)}" isn't something Cashflow can do from the phone yet — ` +
+  'it means moving every transaction, rule and bill filed under it first. Do this from the web app for now.';
 
 const describeSpendProposal = (amountCents: number): string =>
   `Assume ${formatCurrency(amountCents)} a month for runway`;
@@ -190,6 +235,11 @@ const bubble = (theme: Theme, key: string, text: string, align: 'flex-end' | 'fl
  */
 export const ChatSheet = ({ visible, onClose }: Props) => {
   const theme = useTheme();
+  // cashflow-mobile#24: the owner's resolved category set, falling back to
+  // the 13 defaults before the first snapshot lands. Feeds the create_rule
+  // card's category label and the three new category-verb cards.
+  const storeCategories = useFinanceStore((state) => state.categories);
+  const categories = resolveCategories(storeCategories);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [input, setInput] = useState('');
   const [pendingImage, setPendingImage] = useState<{
@@ -274,6 +324,39 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
               reason: action.reason,
               state: { phase: 'pending' },
             },
+          ];
+        }
+        if (action.action === 'add_category') {
+          return [
+            ...previous,
+            {
+              id: createId('chat'),
+              kind: 'category-proposal',
+              category: { kind: 'add', label: action.label, icon: action.icon },
+              reason: action.reason,
+              state: { phase: 'pending' },
+            },
+          ];
+        }
+        if (action.action === 'rename_category') {
+          return [
+            ...previous,
+            {
+              id: createId('chat'),
+              kind: 'category-proposal',
+              category: { kind: 'rename', value: action.value, label: action.label },
+              reason: action.reason,
+              state: { phase: 'pending' },
+            },
+          ];
+        }
+        if (action.action === 'remove_category') {
+          // No card: mobile has no write path to reassign transactions, rules
+          // and bills off the removed category (see accountsWrite.ts) — an
+          // honest explanation, not a button that would fake it.
+          return [
+            ...previous,
+            { id: createId('chat'), kind: 'text', text: describeCategoryRemoval(categories, action.value) },
           ];
         }
         return [...previous, { id: createId('chat'), kind: 'text', text: action.explanation }];
@@ -402,7 +485,7 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
 
     return (
       <Card key={entry.id} style={{ alignSelf: 'flex-start', maxWidth: '90%', gap: theme.spacing.sm }}>
-        <AppText variant="body">{describeRule(entry.rule)}</AppText>
+        <AppText variant="body">{describeRule(categories, entry.rule)}</AppText>
         <AppText variant="secondary" tone="textSecondary">
           {entry.explanation}
         </AppText>
@@ -628,6 +711,80 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
     );
   };
 
+  const updateCategoryProposal = (id: string, state: CategoryProposalState) =>
+    setEntries((previous) =>
+      previous.map((entry) =>
+        entry.id === id && entry.kind === 'category-proposal' ? { ...entry, state } : entry,
+      ),
+    );
+
+  /**
+   * cashflow-mobile#24. add_category/rename_category -> a single
+   * settings.categories merge write via `addCategory`/`renameCategory`
+   * (`accountsWrite.ts`) — same "no undo" shape as `applyBillProposal`.
+   */
+  const applyCategoryProposal = async (entry: Extract<Entry, { kind: 'category-proposal' }>) => {
+    if (entry.state.phase === 'applying' || entry.state.phase === 'applied') return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    updateCategoryProposal(entry.id, { phase: 'applying' });
+    try {
+      if (entry.category.kind === 'add') {
+        await addCategory(entry.category.label, entry.category.icon);
+      } else {
+        await renameCategory(entry.category.value, entry.category.label);
+      }
+      updateCategoryProposal(entry.id, { phase: 'applied' });
+    } catch (error) {
+      const message = isAppError(error) ? error.userMessage : "Cashflow couldn't save that category.";
+      updateCategoryProposal(entry.id, { phase: 'error', message });
+    }
+  };
+
+  const dismissCategoryProposal = (entry: Extract<Entry, { kind: 'category-proposal' }>) =>
+    updateCategoryProposal(entry.id, { phase: 'dismissed' });
+
+  const renderCategoryProposal = (entry: Extract<Entry, { kind: 'category-proposal' }>) => {
+    const { state } = entry;
+
+    if (state.phase === 'dismissed') return bubble(theme, entry.id, entry.reason, 'flex-start');
+
+    if (state.phase === 'applied') {
+      return (
+        <Card key={entry.id} style={{ alignSelf: 'flex-start', maxWidth: '90%' }}>
+          <AppText variant="body">{describeCategoryApplied(entry.category)}</AppText>
+        </Card>
+      );
+    }
+
+    return (
+      <Card key={entry.id} style={{ alignSelf: 'flex-start', maxWidth: '90%', gap: theme.spacing.sm }}>
+        <AppText variant="body">{describeCategoryProposal(categories, entry.category)}</AppText>
+        <AppText variant="secondary" tone="textSecondary">
+          {entry.reason}
+        </AppText>
+        {state.phase === 'error' ? errorBanner(state.message) : null}
+        {state.phase === 'applying' ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+            <ActivityIndicator size="small" color={theme.colors.accent} />
+            <AppText variant="secondary" tone="textSecondary">
+              Saving…
+            </AppText>
+          </View>
+        ) : (
+          <View style={{ flexDirection: 'row', gap: theme.spacing.sm }}>
+            <Button label="Apply" onPress={() => void applyCategoryProposal(entry)} testID="chat-category-apply" />
+            <Button
+              label="Dismiss"
+              variant="secondary"
+              onPress={() => dismissCategoryProposal(entry)}
+              testID="chat-category-dismiss"
+            />
+          </View>
+        )}
+      </Card>
+    );
+  };
+
   const footer = (
     <View style={{ gap: theme.spacing.sm }}>
       {attachError ? errorBanner(attachError) : null}
@@ -719,6 +876,7 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
           if (entry.kind === 'text') return bubble(theme, entry.id, entry.text, 'flex-start');
           if (entry.kind === 'spend-proposal') return renderSpendProposal(entry);
           if (entry.kind === 'bill-proposal') return renderBillProposal(entry);
+          if (entry.kind === 'category-proposal') return renderCategoryProposal(entry);
           return renderProposal(entry);
         })}
 

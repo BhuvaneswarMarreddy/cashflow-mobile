@@ -49,6 +49,7 @@ const basePayload = (assumedMonthlySpend: number | null) => ({
     assumedMonthlySpend,
   },
   accounts: [],
+  categories: [],
   upcoming: [],
   bills: [],
   goals: [],
@@ -92,5 +93,48 @@ describe('createFirebaseRepositories plan.bills', () => {
 
     expect(result).toEqual(bills);
     expect(callable).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * cashflow-mobile#24. `categories` is a top-level payload field, sibling to
+ * `bills`/`goals`/`accounts` — NOT nested inside `snapshot` (verified against
+ * `functions/src/snapshot.ts`'s `buildSnapshot`).
+ */
+describe('createFirebaseRepositories plan.categories', () => {
+  it('carries the resolved category set through from the payload', async () => {
+    const categories = [
+      { value: 'food', label: 'Food & Dining', icon: '🍽️', archived: false },
+      { value: 'vacations', label: 'Vacations', icon: '🏖️' },
+    ];
+    const callable = jest.fn().mockResolvedValue({ data: { ...basePayload(null), categories } });
+    mockHttpsCallable.mockReturnValue(callable);
+
+    const result = await createFirebaseRepositories().plan.categories();
+
+    expect(result).toEqual([
+      { value: 'food', label: 'Food & Dining', icon: '🍽️' },
+      { value: 'vacations', label: 'Vacations', icon: '🏖️' },
+    ]);
+  });
+
+  it('preserves an archived category rather than dropping it', async () => {
+    const categories = [{ value: 'old-hobby', label: 'Old Hobby', icon: '🎨', archived: true }];
+    const callable = jest.fn().mockResolvedValue({ data: { ...basePayload(null), categories } });
+    mockHttpsCallable.mockReturnValue(callable);
+
+    const result = await createFirebaseRepositories().plan.categories();
+
+    expect(result).toEqual([{ value: 'old-hobby', label: 'Old Hobby', icon: '🎨', archived: true }]);
+  });
+
+  it('carries a missing icon through as absent, never synthesizing one here', async () => {
+    const categories = [{ value: 'vacations', label: 'Vacations' }];
+    const callable = jest.fn().mockResolvedValue({ data: { ...basePayload(null), categories } });
+    mockHttpsCallable.mockReturnValue(callable);
+
+    const result = await createFirebaseRepositories().plan.categories();
+
+    expect(result).toEqual([{ value: 'vacations', label: 'Vacations' }]);
   });
 });

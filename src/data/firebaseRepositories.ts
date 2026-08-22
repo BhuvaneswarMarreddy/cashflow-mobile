@@ -1,6 +1,7 @@
 import { httpsCallable } from '@firebase/functions';
 
 import { AppError } from '@/errors';
+import type { CategoryOption } from '@/features/activity/categories';
 import { loggerFor } from '@/logging';
 import { firebaseFunctions, isFirebaseConfigured } from '@/services/firebase';
 import { useFinanceStore } from '@/store/financeStore';
@@ -51,6 +52,14 @@ interface SnapshotPayload {
     assumedMonthlySpend: number | null;
   };
   accounts: Account[];
+  /**
+   * cashflow-mobile#24. The owner's resolved category set — defaults plus
+   * whatever they've added from chat, archived flag preserved. Always
+   * present; a top-level sibling of `bills`/`goals`/`accounts`, same as
+   * `functions/src/snapshot.ts`'s `buildSnapshot` returns it (NOT nested
+   * inside the `snapshot` object above).
+   */
+  categories: { value: string; label: string; icon?: string; archived?: boolean }[];
   upcoming: UpcomingPayment[];
   /**
    * CHAT-BILLS-001: the Bills register digest, for chat context and the
@@ -64,6 +73,22 @@ interface SnapshotPayload {
 }
 
 const toCents = (dollars: number): number => Math.round(dollars * 100);
+
+/**
+ * Passes `icon`/`archived` through only when actually present — never
+ * synthesizes a fallback icon here. `iconFor()` (`@/features/activity/categories`)
+ * is the one place that happens, at render time, so a rename's write-back
+ * (`accountsWrite.ts`'s `customCategoriesOf`) never persists a made-up icon
+ * value that was never really there.
+ */
+const mapCategory = (
+  category: SnapshotPayload['categories'][number],
+): CategoryOption => ({
+  value: category.value,
+  label: category.label,
+  ...(category.icon ? { icon: category.icon } : {}),
+  ...(category.archived ? { archived: true } : {}),
+});
 
 /**
  * One refresh makes one network call.
@@ -214,5 +239,6 @@ export const createFirebaseRepositories = (): Repositories => ({
     goals: async () => (await fetchSnapshot()).goals,
     nextPaycheck: async (): Promise<Paycheck | null> =>
       (await fetchSnapshot()).snapshot.nextPaycheck,
+    categories: async () => (await fetchSnapshot()).categories.map(mapCategory),
   },
 });

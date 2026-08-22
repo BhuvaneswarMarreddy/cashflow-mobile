@@ -1,6 +1,6 @@
 import { httpsCallable } from '@firebase/functions';
 
-import { CATEGORIES } from '@/features/activity/categories';
+import { CATEGORIES, resolveCategories, type CategoryOption } from '@/features/activity/categories';
 import { AppError } from '@/errors';
 import { loggerFor } from '@/logging';
 import { firebaseFunctions, isFirebaseConfigured } from '@/services/firebase';
@@ -50,7 +50,7 @@ export interface ChatContext {
   summary?: object;
 }
 
-/** The four shapes mobile v1 acts on. Anything else collapses to `answer` in `parseChatAction`. */
+/** The shapes mobile v1 acts on. Anything else collapses to `answer` in `parseChatAction`. */
 export type ChatAction =
   | { action: 'answer'; explanation: string }
   | { action: 'create_rule'; rule: { match: RuleMatch; set: RuleSet }; explanation: string }
@@ -70,7 +70,23 @@ export type ChatAction =
       installmentsRemaining?: number;
       nonNegotiable?: boolean;
       reason: string;
-    };
+    }
+  /** cashflow-mobile#24. No model-picked `value` — the app derives a unique,
+   *  collision-safe slug from `label` at Apply time (never trusting a
+   *  model-picked identifier), same as the server. */
+  | { action: 'add_category'; label: string; icon?: string; reason: string }
+  /** `value` must already be a CUSTOM category the owner has — never one of
+   *  the 13 defaults. */
+  | { action: 'rename_category'; value: string; label: string; reason: string }
+  /**
+   * `value` must already be a CUSTOM category the owner has. `reassignTo`
+   * defaults to `'other'` and must be a live, assignable category — never the
+   * value being removed, never archived. Mobile has no write path to
+   * reassign transactions/rules/bills (see `accountsWrite.ts`), so this
+   * parses but is never silently "applied" — `ChatSheet.tsx` renders it as an
+   * explanation, not a write button.
+   */
+  | { action: 'remove_category'; value: string; reassignTo: string; reason: string };
 
 interface AiChatRequest {
   message?: string;
@@ -115,8 +131,15 @@ const SET_KEYS = ['category', 'sourceCategory', 'type', 'merchant'] as const;
  * contract: no `direction`/`accountId`/`onOrAfter` qualifiers, mirroring
  * CategorizeSheet's own minimal match. Returns `null` on anything invalid;
  * the caller falls back to plain text rather than half-trusting the shape.
+ *
+ * `categories` (cashflow-mobile#24) is the owner's resolved set — `set.category`
+ * is checked against its ASSIGNABLE (non-archived) values only, same as the
+ * server's own `create_rule` validation.
  */
-const parseCreateRule = (raw: Record<string, unknown>): ChatAction | null => {
+const parseCreateRule = (
+  raw: Record<string, unknown>,
+  categories: readonly CategoryOption[],
+): ChatAction | null => {
   if (!hasOnlyKeys(raw, ['action', 'rule', 'explanation'])) return null;
   const { rule, explanation } = raw;
   if (typeof explanation !== 'string' || explanation.length === 0) return null;
@@ -138,7 +161,7 @@ const parseCreateRule = (raw: Record<string, unknown>): ChatAction | null => {
   }
   if (
     typeof set.category === 'string' &&
-    !CATEGORIES.some((category) => category.value === set.category)
+    !categories.some((category) => !category.archived && category.value === set.category)
   ) {
     return null;
   }
@@ -328,14 +351,125 @@ const parseRecordBill = (raw: Record<string, unknown>): ChatAction | null => {
   };
 };
 
+// cashflow-mobile#24 — mirrors the server's own MAX bounds exactly
+// (cashflow-forecast `src/lib/chat-actions.ts` `MAX.categoryLabel/categoryIcon/categoryValue`).
+const MAX_CATEGORY_LABEL = 40;
+const MAX_CATEGORY_ICON = 4;
+const MAX_CATEGORY_VALUE = 32;
+
+const ADD_CATEGORY_KEYS = ['action', 'label', 'icon', 'reason'] as const;
+const RENAME_CATEGORY_KEYS = ['action', 'value', 'label', 'reason'] as const;
+const REMOVE_CATEGORY_KEYS = ['action', 'value', 'reassignTo', 'reason'] as const;
+
 /**
- * Defensively parses an untrusted `aiChat` result into one of the four
- * shapes mobile v1 handles. Anything unrecognised, malformed, or carrying a
+ * add_category: label + optional icon only — no model-picked `value`, the app
+ * derives a unique slug from `label` at Apply time (`slugForCategoryLabel`,
+ * `@/features/activity/categories`), never trusting a model-picked identifier.
+ */
+const parseAddCategory = (raw: Record<string, unknown>): ChatAction | null => {
+  if (!hasOnlyKeys(raw, ADD_CATEGORY_KEYS)) return null;
+  const { label, reason } = raw;
+  if (typeof label !== 'string' || label.trim().length === 0 || label.length > MAX_CATEGORY_LABEL) {
+    return null;
+  }
+  if (typeof reason !== 'string' || reason.trim().length === 0) return null;
+
+  let icon: string | undefined;
+  if (raw.icon !== undefined) {
+    if (typeof raw.icon !== 'string' || raw.icon.trim().length === 0 || raw.icon.length > MAX_CATEGORY_ICON) {
+      return null; // present but empty — the model said nothing, don't pretend it did
+    }
+    icon = raw.icon;
+  }
+
+  return { action: 'add_category', label, ...(icon !== undefined ? { icon } : {}), reason };
+};
+
+/**
+ * rename_category / remove_category both require the OWNER's resolved set to
+ * check `value` against — refused outright with no categories, the same "no
+ * context, no action" contract `create_rule`'s category check already has
+ * (an empty `categories` array here means "nothing resolved yet", not "the
+ * owner has zero categories" — every owner has at least the 13 defaults).
+ */
+const parseRenameCategory = (
+  raw: Record<string, unknown>,
+  categories: readonly CategoryOption[],
+): ChatAction | null => {
+  if (!hasOnlyKeys(raw, RENAME_CATEGORY_KEYS)) return null;
+  const { value, label, reason } = raw;
+  if (typeof value !== 'string' || value.trim().length === 0 || value.length > MAX_CATEGORY_VALUE) {
+    return null;
+  }
+  if (typeof label !== 'string' || label.trim().length === 0 || label.length > MAX_CATEGORY_LABEL) {
+    return null;
+  }
+  if (typeof reason !== 'string' || reason.trim().length === 0) return null;
+  // Only a CUSTOM category the owner already has can be renamed — never a
+  // built-in default. Renaming one of the 13 would need a data model for
+  // overriding a default, which this task deliberately does not build.
+  if (CATEGORIES.some((category) => category.value === value)) return null;
+  if (categories.length === 0 || !categories.some((category) => category.value === value)) return null;
+
+  return { action: 'rename_category', value, label, reason };
+};
+
+/**
+ * remove_category: `reassignTo` defaults to `'other'`, must be a live,
+ * assignable category (never archived, never the value being removed).
+ * Mirrors the server's validation exactly, even though mobile never writes
+ * the reassignment itself (see `ChatSheet.tsx`) — a well-formed action here
+ * is what lets the sheet render an honest, specific explanation instead of a
+ * generic fallback.
+ */
+const parseRemoveCategory = (
+  raw: Record<string, unknown>,
+  categories: readonly CategoryOption[],
+): ChatAction | null => {
+  if (!hasOnlyKeys(raw, REMOVE_CATEGORY_KEYS)) return null;
+  const { value, reason } = raw;
+  if (typeof value !== 'string' || value.trim().length === 0 || value.length > MAX_CATEGORY_VALUE) {
+    return null;
+  }
+  if (typeof reason !== 'string' || reason.trim().length === 0) return null;
+  if (CATEGORIES.some((category) => category.value === value)) return null;
+  if (categories.length === 0 || !categories.some((category) => category.value === value)) return null;
+
+  let reassignTo = 'other';
+  if (raw.reassignTo !== undefined) {
+    if (
+      typeof raw.reassignTo !== 'string' ||
+      raw.reassignTo.trim().length === 0 ||
+      raw.reassignTo.length > MAX_CATEGORY_VALUE
+    ) {
+      return null;
+    }
+    reassignTo = raw.reassignTo;
+  }
+  if (reassignTo === value) return null; // can't reassign to the thing being removed
+  if (!categories.some((category) => category.value === reassignTo && !category.archived)) {
+    return null;
+  }
+
+  return { action: 'remove_category', value, reassignTo, reason };
+};
+
+/**
+ * Defensively parses an untrusted `aiChat` result into one of the shapes
+ * mobile handles. Anything unrecognised, malformed, or carrying a
  * prototype-pollution key collapses to a plain `answer` — the model's own
  * `explanation`, when it's a safe string, still reaches the user; otherwise a
  * friendly fallback does. Never throws: an AI response is never worth a crash.
+ *
+ * `categories` (cashflow-mobile#24) is the owner's resolved set, used to
+ * validate `create_rule`'s `set.category` and the three category verbs.
+ * Defaults to the 13 built-ins, so every existing call site (and every
+ * existing test) keeps working exactly as before.
  */
-export const parseChatAction = (raw: unknown): ChatAction => {
+export const parseChatAction = (
+  raw: unknown,
+  categories: readonly CategoryOption[] = CATEGORIES,
+): ChatAction => {
   const fallback = (): ChatAction => ({
     action: 'answer',
     explanation:
@@ -353,9 +487,12 @@ export const parseChatAction = (raw: unknown): ChatAction => {
     return { action: 'answer', explanation: raw.explanation };
   }
 
-  if (raw.action === 'create_rule') return parseCreateRule(raw) ?? fallback();
+  if (raw.action === 'create_rule') return parseCreateRule(raw, categories) ?? fallback();
   if (raw.action === 'set_monthly_spend') return parseSetMonthlySpend(raw) ?? fallback();
   if (raw.action === 'record_bill') return parseRecordBill(raw) ?? fallback();
+  if (raw.action === 'add_category') return parseAddCategory(raw) ?? fallback();
+  if (raw.action === 'rename_category') return parseRenameCategory(raw, categories) ?? fallback();
+  if (raw.action === 'remove_category') return parseRemoveCategory(raw, categories) ?? fallback();
 
   return fallback();
 };
@@ -425,9 +562,15 @@ const CONTEXT_UPCOMING_CAP = 30;
  */
 const toDollars = (cents: number): number => Math.round(cents) / 100;
 const buildContext = (): ChatContext => {
-  const { accounts, transactions, bills, upcoming } = useFinanceStore.getState();
+  const { accounts, transactions, bills, upcoming, categories: storeCategories } =
+    useFinanceStore.getState();
   return {
-    categories: CATEGORIES.map((category) => category.value),
+    // cashflow-mobile#24: the owner's resolved set, ASSIGNABLE only — an
+    // archived category must never appear in what the model is told it can
+    // propose filing a new row (or a new rule) under.
+    categories: resolveCategories(storeCategories)
+      .filter((category) => !category.archived)
+      .map((category) => category.value),
     accounts: accounts.map((account) => account.name),
     recent: transactions.slice(0, 20).map((transaction) => ({
       title: transaction.description,
@@ -511,7 +654,10 @@ export const sendChatTurn = async (input: {
         ? { imageBase64: input.image.base64, imageMimeType: input.image.mimeType }
         : {}),
     });
-    const parsed = parseChatAction(data.result);
+    const parsed = parseChatAction(
+      data.result,
+      resolveCategories(useFinanceStore.getState().categories),
+    );
     // The action TYPE only — never the untrusted result itself, which can
     // carry a merchant string or a category. No figures or merchant text in logs.
     log.info('chat.responded', {

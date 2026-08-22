@@ -5,10 +5,11 @@ import * as Haptics from 'expo-haptics';
 import { AppText, BottomSheet, Divider, Icon, ListRow } from '@/components';
 import { applyMerchantRule, undoDecision, type ApplyDecisionResult } from '@/data/decisions';
 import { isAppError } from '@/errors';
+import { useFinanceStore } from '@/store/financeStore';
 import { useTheme } from '@/theme';
 import type { Transaction } from '@/types';
 
-import { CATEGORIES, type CategoryOption } from './categories';
+import { iconFor, resolveCategories, selectableCategories, type CategoryOption } from './categories';
 
 interface Props {
   /** null closes the sheet (BottomSheet's `visible` follows this). */
@@ -59,6 +60,12 @@ const summarize = (name: string, categoryLabel: string, result: ApplyDecisionRes
 export const CategorizeSheet = ({ transaction, onClose }: Props) => {
   const theme = useTheme();
   const [state, setState] = useState<SheetState>(INITIAL_STATE);
+  // cashflow-mobile#24: the owner's resolved category set (defaults + custom),
+  // falling back to the 13 defaults before the first snapshot lands. Archived
+  // categories never appear here for a NEW pick, except the transaction's own
+  // current value — see `selectableCategories`.
+  const storeCategories = useFinanceStore((financeState) => financeState.categories);
+  const categories = selectableCategories(resolveCategories(storeCategories), transaction?.category);
 
   // Every reopen — including the same transaction long-pressed again after a
   // previous close — starts from the pick list, never the last run's "done".
@@ -177,13 +184,13 @@ export const CategorizeSheet = ({ transaction, onClose }: Props) => {
               </AppText>
             </View>
           ) : null}
-          {CATEGORIES.map((category, index) => {
+          {categories.map((category, index) => {
             const isCurrent = category.value === transaction.category;
             return (
               <View key={category.value}>
                 {index > 0 ? <Divider inset={theme.spacing.lg} /> : null}
                 <ListRow
-                  title={`${category.emoji} ${category.label}`}
+                  title={`${iconFor(category)} ${category.label}`}
                   accessibilityLabel={
                     isCurrent ? `${category.label}, current category` : category.label
                   }

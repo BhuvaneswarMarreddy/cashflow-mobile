@@ -1,3 +1,5 @@
+import { CATEGORIES } from '@/features/activity/categories';
+
 import { buildBaseDataset, isoDate, isoTime, type MockDataset } from './dataset';
 
 /**
@@ -170,6 +172,7 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       transactions: [],
       upcoming: [],
       bills: [],
+      categories: [...CATEGORIES],
       goals: [],
       paycheck: null,
       notifications: [],

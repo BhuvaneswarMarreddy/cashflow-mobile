@@ -1,4 +1,5 @@
 import { AppError } from '@/errors';
+import { useFinanceStore } from '@/store/financeStore';
 import { fireEvent, renderWithProviders, waitFor } from '@/test/render';
 import type { Transaction } from '@/types';
 
@@ -41,6 +42,7 @@ const noMerchant: Transaction = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  useFinanceStore.setState({ categories: [] });
 });
 
 describe('CategorizeSheet', () => {
@@ -254,6 +256,43 @@ describe('CategorizeSheet', () => {
     expect(queryByTestId('row-undo')).toBeNull(); // Not in done state
     // Categories should still be visible (we're on pick)
     expect(queryByTestId('category-shopping')).toBeTruthy();
+  });
+
+  describe('cashflow-mobile#24: the owner\'s resolved category set', () => {
+    it('shows a custom category from the store alongside the 13 defaults', async () => {
+      useFinanceStore.setState({
+        categories: [...CATEGORIES, { value: 'vacations', label: 'Vacations', icon: '🏖️' }],
+      });
+      const { getByTestId } = await renderWithProviders(
+        <CategorizeSheet transaction={withMerchant} onClose={jest.fn()} />,
+      );
+
+      expect(getByTestId('category-vacations')).toBeTruthy();
+    });
+
+    it('hides an archived category from a NEW selection', async () => {
+      useFinanceStore.setState({
+        categories: [...CATEGORIES, { value: 'old-hobby', label: 'Old Hobby', icon: '🎨', archived: true }],
+      });
+      const { queryByTestId } = await renderWithProviders(
+        <CategorizeSheet transaction={withMerchant} onClose={jest.fn()} />,
+      );
+
+      expect(queryByTestId('category-old-hobby')).toBeNull();
+    });
+
+    it('still resolves an archived category for a transaction already filed under it', async () => {
+      useFinanceStore.setState({
+        categories: [...CATEGORIES, { value: 'old-hobby', label: 'Old Hobby', icon: '🎨', archived: true }],
+      });
+      const archivedTxn: Transaction = { ...withMerchant, category: 'old-hobby' };
+      const { getByTestId } = await renderWithProviders(
+        <CategorizeSheet transaction={archivedTxn} onClose={jest.fn()} />,
+      );
+
+      expect(getByTestId('category-old-hobby')).toBeTruthy();
+      expect(getByTestId('category-old-hobby').props.accessibilityLabel).toContain('current category');
+    });
   });
 
   it('does not close sheet when undo resolves after transaction switches', async () => {

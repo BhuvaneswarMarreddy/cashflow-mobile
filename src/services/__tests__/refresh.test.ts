@@ -42,6 +42,8 @@ describe('refreshFinancialData', () => {
     expect(state.lastError).toBeNull();
     // CHAT-BILLS-001: the Bills register digest rides the same 'plan' fetch upcoming does.
     expect(state.bills.length).toBeGreaterThan(0);
+    // cashflow-mobile#24: the resolved category set rides the same 'plan' fetch.
+    expect(state.categories.length).toBeGreaterThan(0);
   });
 
   it('detects what changed against the previous snapshot', async () => {

@@ -1,4 +1,5 @@
 import { apiClient, type ApiClient } from '@/api';
+import type { CategoryOption } from '@/features/activity/categories';
 
 import type { Repositories, SnapshotBundle } from './types';
 import type { Account, BillDigest, Paycheck, SavingsGoal, Transaction, UpcomingPayment } from '@/types';
@@ -35,5 +36,6 @@ export const createHttpRepositories = (client: ApiClient = apiClient): Repositor
     bills: async () => (await client.get<BillDigest[]>('/plan/bills')).data,
     goals: async () => (await client.get<SavingsGoal[]>('/plan/goals')).data,
     nextPaycheck: async () => (await client.get<Paycheck | null>('/plan/paycheck')).data,
+    categories: async () => (await client.get<CategoryOption[]>('/plan/categories')).data,
   },
 });

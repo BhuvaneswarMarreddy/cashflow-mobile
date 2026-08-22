@@ -437,6 +437,129 @@ describe('parseChatAction', () => {
     });
   });
 
+  /**
+   * cashflow-mobile#25. Mirrors the server's own parser matrix
+   * (cashflow-forecast `src/lib/chat-actions.ts`'s `report` branch,
+   * `src/__tests__/chat-actions.test.ts`) exactly — same bounds, same
+   * accept/reject cases. DISPLAY ONLY: never carries a rule, an explanation
+   * or a reason, and must never be mistaken for a proposal.
+   */
+  describe('report — cashflow-mobile#25, a DISPLAY-ONLY table', () => {
+    const valid = {
+      action: 'report',
+      title: 'Spending by category, August 2026',
+      columns: ['Category', 'Spent'],
+      rows: [['Groceries', 412.5], ['Dining', 88]],
+      note: 'Top 2 of 9 categories shown.',
+    };
+
+    it('accepts a well-formed report', () => {
+      expect(parseChatAction(valid)).toEqual(valid);
+    });
+
+    it('accepts a report with no note — omitted, not undefined', () => {
+      const { note: _note, ...withoutNote } = valid;
+      const parsed = parseChatAction(withoutNote);
+      expect(parsed).toEqual(withoutNote);
+      expect(parsed && 'note' in parsed).toBe(false);
+    });
+
+    it('accepts every boundary at its max: 80-char title, 6 columns of 24 chars, 30 rows, 40-char cells', () => {
+      const columns = Array.from({ length: 6 }, (_, i) => `Column ${i}`.padEnd(24, 'x').slice(0, 24));
+      const rows = Array.from({ length: 30 }, () => columns.map(() => 'x'.repeat(40)));
+      const parsed = parseChatAction({
+        action: 'report',
+        title: 'T'.repeat(80),
+        columns,
+        rows,
+      });
+      expect(parsed).not.toBeNull();
+      expect(parsed.action).toBe('report');
+    });
+
+    it('accepts a numeric cell of 0 and a negative number — finite, not "truthy"', () => {
+      const raw = {
+        action: 'report',
+        title: 'Net by month',
+        columns: ['Month', 'Net'],
+        rows: [['July', 0], ['June', -125.5]],
+      };
+      expect(parseChatAction(raw)).toEqual(raw);
+    });
+
+    it('accepts a 1-column report', () => {
+      const raw = { action: 'report', title: 'Categories', columns: ['Category'], rows: [['Groceries']] };
+      expect(parseChatAction(raw)).toEqual(raw);
+    });
+
+    it('accepts an empty string cell — present but says nothing', () => {
+      const raw = { action: 'report', title: 'T', columns: ['A', 'B'], rows: [['x', '']] };
+      expect(parseChatAction(raw)).toEqual(raw);
+    });
+
+    const FALLBACK = { action: 'answer', explanation: "I can't do that from the phone yet." };
+
+    const bad: [string, unknown][] = [
+      ['missing title', { action: 'report', columns: ['A'], rows: [] }],
+      ['empty title', { ...valid, title: '' }],
+      ['whitespace-only title', { ...valid, title: '   ' }],
+      ['title over 80 chars', { ...valid, title: 'T'.repeat(81) }],
+      ['non-string title', { ...valid, title: 42 }],
+      ['missing columns', { action: 'report', title: 'T', rows: [] }],
+      ['empty columns array', { ...valid, columns: [] }],
+      ['columns not an array', { ...valid, columns: 'Category' }],
+      ['7 columns — over the cap of 6', { ...valid, columns: ['A', 'B', 'C', 'D', 'E', 'F', 'G'], rows: [] }],
+      ['a column label over 24 chars', { ...valid, columns: ['x'.repeat(25), 'Spent'] }],
+      ['an empty column label', { ...valid, columns: ['', 'Spent'] }],
+      ['a non-string column label', { ...valid, columns: [1, 'Spent'] }],
+      ['rows not an array', { ...valid, rows: 'nope' }],
+      ['31 rows — over the cap of 30', { ...valid, rows: Array.from({ length: 31 }, () => ['X', 1]) }],
+      ['a ragged row — too few cells', { ...valid, rows: [['Groceries']] }],
+      ['a ragged row — too many cells', { ...valid, rows: [['Groceries', 412.5, 'extra']] }],
+      ['a row that is not an array', { ...valid, rows: [{ Category: 'Groceries', Spent: 412.5 }] }],
+      ['a cell over 40 chars', { ...valid, rows: [['x'.repeat(41), 1]] }],
+      ['a non-finite number cell (NaN)', { ...valid, rows: [['Groceries', NaN]] }],
+      ['a non-finite number cell (Infinity)', { ...valid, rows: [['Groceries', Infinity]] }],
+      ['a boolean cell', { ...valid, rows: [['Groceries', true]] }],
+      ['a null cell', { ...valid, rows: [['Groceries', null]] }],
+      ['an object cell', { ...valid, rows: [['Groceries', { amount: 1 }]] }],
+      ['an array cell', { ...valid, rows: [['Groceries', [1, 2]]] }],
+      ['a note over 200 chars', { ...valid, note: 'n'.repeat(201) }],
+      ['an empty note (present but says nothing)', { ...valid, note: '' }],
+      ['a non-string note', { ...valid, note: 5 }],
+      ['an unknown top-level key', { ...valid, source: 'model' }],
+    ];
+
+    it.each(bad)('rejects %s, falling back to text', (_label, payload) => {
+      expect(parseChatAction(payload)).toEqual(FALLBACK);
+    });
+
+    it('rejects an explanation smuggled in alongside report — same "a stray explanation still speaks" fallback every other action has', () => {
+      // Mirrors create_rule's own "rejects extra top-level keys" precedent above:
+      // the shape fails report's strict parse (an extra key), and the generic
+      // fallback then surfaces the model's own `explanation` string rather than
+      // the canned "can't do that" text.
+      expect(parseChatAction({ ...valid, explanation: 'hi' })).toEqual({
+        action: 'answer',
+        explanation: 'hi',
+      });
+    });
+
+    it('rejects a prototype-pollution shaped payload inside a row', () => {
+      const raw = JSON.parse(
+        '{"action":"report","title":"T","columns":["A"],"rows":[[{"__proto__":{"x":1}}]]}',
+      ) as unknown;
+      expect(parseChatAction(raw)).toEqual(FALLBACK);
+    });
+
+    it('never carries a rule, an explanation, or a reason — a report is never mistaken for a proposal', () => {
+      const parsed = parseChatAction(valid);
+      expect(parsed && 'explanation' in parsed).toBe(false);
+      expect(parsed && 'reason' in parsed).toBe(false);
+      expect(parsed && 'rule' in parsed).toBe(false);
+    });
+  });
+
   describe('record_bill server parity', () => {
     const base = {
       action: 'record_bill',

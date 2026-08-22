@@ -543,6 +543,109 @@ describe('ChatSheet', () => {
     });
   });
 
+  describe('cashflow-mobile#25: report (a DISPLAY-ONLY table)', () => {
+    it('renders a table card with title, header row, data rows and note', async () => {
+      mockSend.mockResolvedValue({
+        action: 'report',
+        title: 'Spending by category, August 2026',
+        columns: ['Category', 'Spent'],
+        rows: [
+          ['Groceries', 412.5],
+          ['Dining', 88],
+        ],
+        note: 'Top 2 of 9 categories shown.',
+      });
+      const { getByTestId, getByText } = await renderSheet();
+
+      await fireEvent.changeText(getByTestId('chat-input'), 'what did I spend on this month?');
+      await fireEvent.press(getByTestId('chat-send'));
+
+      await waitFor(() => expect(getByTestId('chat-report')).toBeTruthy());
+      expect(getByText('Spending by category, August 2026')).toBeTruthy();
+      expect(getByText('Category')).toBeTruthy();
+      expect(getByText('Spent')).toBeTruthy();
+      expect(getByText('Groceries')).toBeTruthy();
+      expect(getByText('412.5')).toBeTruthy();
+      expect(getByText('Dining')).toBeTruthy();
+      expect(getByText('88')).toBeTruthy();
+      expect(getByText('Top 2 of 9 categories shown.')).toBeTruthy();
+    });
+
+    it('renders no apply/undo affordance — it is DISPLAY ONLY, never a proposal', async () => {
+      mockSend.mockResolvedValue({
+        action: 'report',
+        title: 'Spending by category',
+        columns: ['Category', 'Spent'],
+        rows: [['Groceries', 412.5]],
+      });
+      const { getByTestId, queryByText, queryByTestId } = await renderSheet();
+
+      await fireEvent.changeText(getByTestId('chat-input'), 'what did I spend on?');
+      await fireEvent.press(getByTestId('chat-send'));
+      await waitFor(() => expect(getByTestId('chat-report')).toBeTruthy());
+
+      expect(queryByText('Apply')).toBeNull();
+      expect(queryByText('Dismiss')).toBeNull();
+      expect(queryByText('Undo')).toBeNull();
+      expect(queryByTestId('chat-report-apply')).toBeNull();
+    });
+
+    it('renders a 1-column report', async () => {
+      mockSend.mockResolvedValue({
+        action: 'report',
+        title: 'Categories',
+        columns: ['Category'],
+        rows: [['Groceries'], ['Dining']],
+      });
+      const { getByTestId, getByText } = await renderSheet();
+
+      await fireEvent.changeText(getByTestId('chat-input'), 'what are my categories?');
+      await fireEvent.press(getByTestId('chat-send'));
+
+      await waitFor(() => expect(getByTestId('chat-report')).toBeTruthy());
+      expect(getByText('Category')).toBeTruthy();
+      expect(getByText('Groceries')).toBeTruthy();
+      expect(getByText('Dining')).toBeTruthy();
+    });
+
+    it('renders a 6-column report without breaking the sheet layout', async () => {
+      mockSend.mockResolvedValue({
+        action: 'report',
+        title: 'Six-column comparison',
+        columns: ['A', 'B', 'C', 'D', 'E', 'F'],
+        rows: [['1', 2, '3', 4, '5', 6]],
+      });
+      const { getByTestId, getByText } = await renderSheet();
+
+      await fireEvent.changeText(getByTestId('chat-input'), 'compare everything');
+      await fireEvent.press(getByTestId('chat-send'));
+
+      await waitFor(() => expect(getByTestId('chat-report')).toBeTruthy());
+      for (const label of ['A', 'B', 'C', 'D', 'E', 'F']) {
+        expect(getByText(label)).toBeTruthy();
+      }
+      expect(getByText('2')).toBeTruthy();
+      expect(getByText('6')).toBeTruthy();
+    });
+
+    it('gives the header row and each data row an accessibility label VoiceOver can read as one unit', async () => {
+      mockSend.mockResolvedValue({
+        action: 'report',
+        title: 'Spending by category',
+        columns: ['Category', 'Spent'],
+        rows: [['Groceries', 412.5]],
+      });
+      const { getByTestId, getByLabelText } = await renderSheet();
+
+      await fireEvent.changeText(getByTestId('chat-input'), 'what did I spend on?');
+      await fireEvent.press(getByTestId('chat-send'));
+
+      await waitFor(() => expect(getByTestId('chat-report')).toBeTruthy());
+      expect(getByLabelText('Columns: Category, Spent')).toBeTruthy();
+      expect(getByLabelText('Category: Groceries, Spent: 412.5')).toBeTruthy();
+    });
+  });
+
   it('shows the AppError userMessage inline on a send failure, with a retry', async () => {
     mockSend.mockRejectedValue(
       new AppError({ category: 'service-unavailable', userMessage: 'Daily AI limit reached — try again tomorrow.' }),

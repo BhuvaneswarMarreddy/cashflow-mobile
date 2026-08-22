@@ -237,8 +237,8 @@ describe('CategorizeSheet', () => {
     await fireEvent.press(getByTestId('category-transportation'));
 
     // Switch to transaction B (null then B, as TransactionsList does)
-    rerender(<CategorizeSheet transaction={null} onClose={onClose} />);
-    rerender(<CategorizeSheet transaction={noMerchant} onClose={onClose} />);
+    await rerender(<CategorizeSheet transaction={null} onClose={onClose} />);
+    await rerender(<CategorizeSheet transaction={noMerchant} onClose={onClose} />);
 
     // Resolve the deferred pick from A — should NOT update B's state
     resolvePick({
@@ -246,12 +246,51 @@ describe('CategorizeSheet', () => {
       changed: { transactionsMatched: 4, monthsAffected: ['2026-08'] },
     });
 
+    // Wait a tick to let the promise settle and any stale setState run
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
     // B should remain on pick list, not show A's done state or summary
-    await waitFor(() => {
-      // Should show transaction B's description, not A's
-      expect(queryByTestId('row-undo')).toBeNull(); // Not in done state
-    });
+    // The guard prevents the stale setState from updating state for txn A after switching to B
+    expect(queryByTestId('row-undo')).toBeNull(); // Not in done state
     // Categories should still be visible (we're on pick)
     expect(queryByTestId('category-shopping')).toBeTruthy();
+  });
+
+  it('does not close sheet when undo resolves after transaction switches', async () => {
+    // Deferred promise: undo on A, switch to B, resolve undo.
+    // Asserts the late undo resolution does not close B's sheet.
+    let resolveUndo: any;
+    const undoPromise = new Promise((resolve) => {
+      resolveUndo = resolve;
+    });
+    mockApply.mockResolvedValue({
+      decisionId: 'd_undo_switch',
+      changed: { transactionsMatched: 1, monthsAffected: ['2026-08'] },
+    });
+    mockUndo.mockReturnValue(undoPromise);
+
+    const onClose = jest.fn();
+    const { getByTestId, rerender } = await renderWithProviders(
+      <CategorizeSheet transaction={withMerchant} onClose={onClose} />,
+    );
+
+    // Get to done state
+    await fireEvent.press(getByTestId('category-transportation'));
+    await waitFor(() => expect(getByTestId('row-undo')).toBeTruthy());
+
+    // Start undo
+    await fireEvent.press(getByTestId('row-undo'));
+
+    // Switch to transaction B (null then B) before undo resolves
+    await rerender(<CategorizeSheet transaction={null} onClose={onClose} />);
+    await rerender(<CategorizeSheet transaction={noMerchant} onClose={onClose} />);
+
+    // Resolve the undo from A — should NOT call onClose (would close B)
+    resolveUndo(undefined);
+
+    // Verify onClose was never called
+    await waitFor(() => {
+      expect(onClose).not.toHaveBeenCalled();
+    });
   });
 });

@@ -123,6 +123,8 @@ export const CategorizeSheet = ({ transaction, onClose }: Props) => {
     const capturedTxnId = transaction?.id;
     try {
       await undoDecision(state.result.decisionId);
+      // Bail if the sheet switched transactions: do not close the new sheet.
+      if (capturedTxnId !== txnIdRef.current) return;
       onClose();
     } catch (error) {
       // Bail if the sheet switched transactions: do not show this error in the new transaction.

@@ -263,6 +263,89 @@ describe('parseChatAction', () => {
       expect(parseChatAction(raw)).toEqual({ action: 'answer', explanation: 'nope' });
     });
   });
+
+  describe('set_monthly_spend', () => {
+    it('accepts a valid set_monthly_spend action', () => {
+      const raw = { action: 'set_monthly_spend', amount: 9000, reason: 'You asked to plan around $9,000/mo.' };
+      expect(parseChatAction(raw)).toEqual({
+        action: 'set_monthly_spend',
+        amount: 9000,
+        reason: 'You asked to plan around $9,000/mo.',
+      });
+    });
+
+    it('accepts the upper bound of 1,000,000', () => {
+      const raw = { action: 'set_monthly_spend', amount: 1_000_000, reason: 'r' };
+      expect(parseChatAction(raw)).toEqual({ action: 'set_monthly_spend', amount: 1_000_000, reason: 'r' });
+    });
+
+    it('rejects zero and negative amounts', () => {
+      expect(parseChatAction({ action: 'set_monthly_spend', amount: 0, reason: 'r' })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+      expect(parseChatAction({ action: 'set_monthly_spend', amount: -1, reason: 'r' })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+    });
+
+    it('rejects an amount over the 1,000,000 cap', () => {
+      const raw = { action: 'set_monthly_spend', amount: 1_000_001, reason: 'r' };
+      expect(parseChatAction(raw)).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+    });
+
+    it('rejects a non-finite amount', () => {
+      expect(parseChatAction({ action: 'set_monthly_spend', amount: Infinity, reason: 'r' })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+      expect(parseChatAction({ action: 'set_monthly_spend', amount: NaN, reason: 'r' })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+    });
+
+    it('rejects a non-numeric amount', () => {
+      const raw = { action: 'set_monthly_spend', amount: '9000', reason: 'r' };
+      expect(parseChatAction(raw)).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+    });
+
+    it('rejects a missing or empty reason', () => {
+      expect(parseChatAction({ action: 'set_monthly_spend', amount: 9000 })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+      expect(parseChatAction({ action: 'set_monthly_spend', amount: 9000, reason: '' })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+    });
+
+    it('rejects extra top-level keys', () => {
+      const raw = { action: 'set_monthly_spend', amount: 9000, reason: 'r', extra: true };
+      expect(parseChatAction(raw)).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+    });
+
+    it('rejects a __proto__ key alongside an otherwise valid payload', () => {
+      const raw = JSON.parse(
+        '{"action":"set_monthly_spend","amount":9000,"reason":"r","__proto__":{"polluted":true}}',
+      ) as unknown;
+      expect(parseChatAction(raw)).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+    });
+  });
 });
 
 describe('sendChatTurn', () => {

@@ -35,10 +35,11 @@ export interface ChatContext {
   summary?: object;
 }
 
-/** The two shapes mobile v1 acts on. Anything else collapses to `answer` in `parseChatAction`. */
+/** The three shapes mobile v1 acts on. Anything else collapses to `answer` in `parseChatAction`. */
 export type ChatAction =
   | { action: 'answer'; explanation: string }
-  | { action: 'create_rule'; rule: { match: RuleMatch; set: RuleSet }; explanation: string };
+  | { action: 'create_rule'; rule: { match: RuleMatch; set: RuleSet }; explanation: string }
+  | { action: 'set_monthly_spend'; amount: number; reason: string };
 
 interface AiChatRequest {
   message?: string;
@@ -121,8 +122,32 @@ const parseCreateRule = (raw: Record<string, unknown>): ChatAction | null => {
   };
 };
 
+/** The owner's own spend cap, mirroring `MATCH_FIELDS`/`SET_KEYS`' role for `create_rule`. */
+const MAX_ASSUMED_SPEND = 1_000_000;
+
 /**
- * Defensively parses an untrusted `aiChat` result into one of the two
+ * Validates `{ amount, reason }` for a monthly-spend assumption. `amount` is
+ * dollars, matching the wire shape the `setAssumedMonthlySpend` write and the
+ * `homeSnapshot` payload both use — the cents conversion happens at the
+ * Firestore/store boundary, not here.
+ */
+const parseSetMonthlySpend = (raw: Record<string, unknown>): ChatAction | null => {
+  if (!hasOnlyKeys(raw, ['action', 'amount', 'reason'])) return null;
+  const { amount, reason } = raw;
+  if (typeof reason !== 'string' || reason.length === 0) return null;
+  if (
+    typeof amount !== 'number' ||
+    !Number.isFinite(amount) ||
+    amount <= 0 ||
+    amount > MAX_ASSUMED_SPEND
+  ) {
+    return null;
+  }
+  return { action: 'set_monthly_spend', amount, reason };
+};
+
+/**
+ * Defensively parses an untrusted `aiChat` result into one of the three
  * shapes mobile v1 handles. Anything unrecognised, malformed, or carrying a
  * prototype-pollution key collapses to a plain `answer` — the model's own
  * `explanation`, when it's a safe string, still reaches the user; otherwise a
@@ -147,6 +172,7 @@ export const parseChatAction = (raw: unknown): ChatAction => {
   }
 
   if (raw.action === 'create_rule') return parseCreateRule(raw) ?? fallback();
+  if (raw.action === 'set_monthly_spend') return parseSetMonthlySpend(raw) ?? fallback();
 
   return fallback();
 };

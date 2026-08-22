@@ -34,12 +34,19 @@ export interface RuleSet {
   merchant?: string;
 }
 
+/** What the write actually did — the server's own name for this shape (functions/src/decisions.ts). */
 export interface ChangeSummary {
+  transactionsMatched: number;
+  monthsAffected: string[];
+}
+
+/** The callable's full response envelope. Named for what it is, not reusing
+ *  `ChangeSummary` — the server uses that name for `changed`, the INNER
+ *  object, and a client type that names the OUTER envelope the same thing
+ *  is confusing at every call site that reads `.changed`. */
+export interface ApplyDecisionResult {
   decisionId: string;
-  changed: {
-    transactionsMatched: number;
-    monthsAffected: string[];
-  };
+  changed: ChangeSummary;
 }
 
 const callableOrThrow = () => {
@@ -58,10 +65,10 @@ const callableOrThrow = () => {
 export const applyMerchantRule = async (input: {
   match: RuleMatch;
   set: RuleSet;
-}): Promise<ChangeSummary> => {
+}): Promise<ApplyDecisionResult> => {
   const callable = httpsCallable<
     { kind: 'merchantRule'; match: RuleMatch; set: RuleSet },
-    ChangeSummary
+    ApplyDecisionResult
   >(callableOrThrow(), 'applyDecision');
   try {
     const { data } = await callable({ kind: 'merchantRule', ...input });

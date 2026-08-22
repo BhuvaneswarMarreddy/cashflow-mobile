@@ -4,7 +4,8 @@ import { AppError } from '@/errors';
 import { triggerRefresh } from '@/hooks/useRefresh';
 import { loggerFor } from '@/logging';
 import { firebaseAuth, firestore, isFirebaseConfigured } from '@/services/firebase';
-import type { AccountKind } from '@/types';
+import { useFinanceStore } from '@/store/financeStore';
+import type { Account, AccountKind, BillFrequency } from '@/types';
 
 /**
  * Creating an account, from the phone.
@@ -244,6 +245,132 @@ export const setAssumedMonthlySpend = async (dollars: number | null): Promise<vo
       category: 'data',
       code: 'ASSUMED_SPEND_WRITE_FAILED',
       userMessage: "Cashflow couldn't save that assumption.",
+      technicalMessage: (error as { message?: string })?.message ?? 'setDoc failed',
+      retryable: true,
+      cause: error,
+    });
+  }
+};
+
+/**
+ * CHAT-BILLS-001 — recording a Bill from chat's `record_bill` proposal.
+ *
+ * Mobile has no Bills tab of its own (BILLS-001+ is a web-only surface); this
+ * is the phone's only write path into `users/{uid}/bills`. The document shape
+ * mirrors the web's `addBill` (cashflow-forecast/src/lib/firestore.ts) EXACTLY
+ * — `firestore.rules` requires vendor/amount/frequency/paymentMethodId/
+ * migrationStatus/lifecycleStatus, and a shape mismatch is silently rejected,
+ * not a validation error the owner would ever see. `migrationStatus:
+ * 'to-review'` / `lifecycleStatus: 'active'` mirror the web's own record_bill
+ * card defaults (a manually recorded row, not an audited-migration one) — see
+ * `DataChatSheet.tsx`'s `applyBill`.
+ *
+ * `autopayDay`/`anchorDate` arrive PRE-RESOLVED (see `resolveBillAnchor` in
+ * `chat.ts`) — this function never re-derives them, only assembles the
+ * document. Calling with a non-monthly frequency and no `anchorDate` still
+ * writes (rules allow it); the card is what refuses to offer Apply without
+ * one, exactly like the web's BillProposalCard.
+ */
+export interface NewBill {
+  vendor: string;
+  amountCents: number;
+  frequency: BillFrequency;
+  /** As the model said it — resolved against the store's accounts below. */
+  accountName?: string;
+  autopayDay?: number;
+  anchorDate?: string;
+  endDate?: string;
+  installmentsRemaining?: number;
+  nonNegotiable?: boolean;
+}
+
+/**
+ * `accountName` -> a `paymentMethodId`. Mobile has no bundled payment-method
+ * registry like the web's `PAYMENT_METHODS` (that is dad's manually curated
+ * institution list) — the closest equivalent here is the owner's own linked
+ * accounts, so a resolved name becomes that account's id. Exact match first,
+ * then a unique substring match (same algorithm as the web's `resolveAccount`
+ * family); anything else — no name given, no match, or an ambiguous one —
+ * falls back to 'manual' rather than blocking the whole proposal, per spec.
+ */
+export const resolvePaymentMethodId = (
+  accountName: string | undefined,
+  accounts: readonly Account[],
+): string => {
+  const needle = accountName?.trim().toLowerCase();
+  if (!needle) return 'manual';
+  const exact = accounts.filter((account) => account.name.trim().toLowerCase() === needle);
+  if (exact.length === 1) return exact[0].id;
+  const contains = accounts.filter((account) => account.name.toLowerCase().includes(needle));
+  return contains.length === 1 ? contains[0].id : 'manual';
+};
+
+/** The document body, separated from the write so it can be tested directly. */
+export const billDocument = (input: NewBill, paymentMethodId: string): Record<string, unknown> => ({
+  vendor: input.vendor.trim(),
+  amount: toDollars(input.amountCents),
+  frequency: input.frequency,
+  paymentMethodId,
+  migrationStatus: 'to-review',
+  lifecycleStatus: 'active',
+  ...(input.autopayDay != null ? { autopayDay: input.autopayDay } : {}),
+  ...(input.anchorDate ? { anchorDate: input.anchorDate } : {}),
+  ...(input.endDate ? { endDate: input.endDate } : {}),
+  ...(input.installmentsRemaining != null ? { installmentsRemaining: input.installmentsRemaining } : {}),
+  ...(input.nonNegotiable != null ? { nonNegotiable: input.nonNegotiable } : {}),
+});
+
+export const createBill = async (input: NewBill): Promise<string> => {
+  if (!isFirebaseConfigured()) {
+    throw new AppError({
+      category: 'service-unavailable',
+      code: 'FIREBASE_NOT_CONFIGURED',
+      userMessage: 'Cashflow is not connected yet.',
+      technicalMessage: 'EXPO_PUBLIC_FIREBASE_* missing',
+      retryable: false,
+    });
+  }
+
+  const uid = firebaseAuth().currentUser?.uid;
+  if (!uid) {
+    throw new AppError({
+      category: 'authentication',
+      code: 'NOT_SIGNED_IN',
+      userMessage: 'Sign in again to record a bill.',
+      technicalMessage: 'createBill called with no Firebase user',
+      retryable: false,
+    });
+  }
+
+  const paymentMethodId = resolvePaymentMethodId(
+    input.accountName,
+    useFinanceStore.getState().accounts,
+  );
+  const bills = collection(firestore(), 'users', uid, 'bills');
+  const ref = doc(bills);
+
+  try {
+    await setDoc(ref, {
+      ...billDocument(input, paymentMethodId),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    // The SHAPE only, never vendor/amount — same posture as `account.created`.
+    log.info('bill.created', {
+      metadata: { frequency: input.frequency, resolvedAccount: paymentMethodId !== 'manual' },
+    });
+    // Chat is a fire-and-forget write with no screen-level refresh of its own
+    // — same posture as `setAssumedMonthlySpend`.
+    triggerRefresh('tap');
+    return ref.id;
+  } catch (error) {
+    log.warn('bill.create_failed', {
+      metadata: { code: (error as { code?: string })?.code ?? 'unknown' },
+    });
+    throw new AppError({
+      category: 'data',
+      code: 'BILL_CREATE_FAILED',
+      userMessage: "Cashflow couldn't save that bill.",
       technicalMessage: (error as { message?: string })?.message ?? 'setDoc failed',
       retryable: true,
       cause: error,

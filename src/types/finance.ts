@@ -82,6 +82,12 @@ export interface BillDigest {
   amountCents: number;
   frequency: BillFrequency;
   nonNegotiable: boolean;
+  /** ISO day the bill stops charging, or null — the "does it end?" answer. */
+  endDate: string | null;
+  /** Payments left on an installment plan, or null. Does not auto-decrement. */
+  installmentsRemaining: number | null;
+  /** Human label of the payment method ("Apple Card", "Manual / other"). */
+  method: string | null;
 }
 
 export interface Paycheck {

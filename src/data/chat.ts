@@ -35,9 +35,17 @@ export interface ChatContext {
   recent?: { title?: string; merchant?: string; amount?: number; category?: string }[];
   /** CHAT-BILLS-001: the Bills register, so the model can answer "what are my
    *  recurring payments" and avoid proposing a `record_bill` duplicate. */
-  bills?: { vendor: string; amount: number; frequency: BillFrequency }[];
+  bills?: {
+    vendor: string;
+    amount: number;
+    frequency: BillFrequency;
+    nonNegotiable?: boolean;
+    endDate?: string | null;
+    installmentsRemaining?: number | null;
+    method?: string | null;
+  }[];
   /** Projected occurrences (forecast events + the Bills register combined,
-   *  server-side) — same `amount` convention as `recent` (see `buildContext`). */
+   *  server-side). Dollars, like every other `amount` here (see `buildContext`). */
   upcoming?: { name: string; dueDate: string; amount: number }[];
   summary?: object;
 }
@@ -384,10 +392,16 @@ const CONTEXT_UPCOMING_CAP = 30;
  * Categories list, account names, recent transactions, the Bills register and
  * upcoming occurrences — no summary in v1. `bills`/`upcoming` let the model
  * answer "what are my recurring payments" and avoid proposing a `record_bill`
- * duplicate (CHAT-BILLS-001). `amount` on every list here is cents, same
- * (pre-existing) convention as `recent.amount` above — the model reasons over
- * these numbers as text, it does not round-trip them through a write.
+ * duplicate (CHAT-BILLS-001).
+ *
+ * UNITS: every `amount` here is DOLLARS, because the server renders them with
+ * `money()` = `toFixed(2)` (functions/src/prompts.ts) and prints the number it
+ * is given. Sending this app's native cents made the model read $45.79 as
+ * "$4579.00" — a 100× lie in every figure it quoted back. The conversion
+ * happens here, once, at the wire boundary, exactly like the snapshot payload's
+ * dollars→cents conversion happens once on the way in.
  */
+const toDollars = (cents: number): number => Math.round(cents) / 100;
 const buildContext = (): ChatContext => {
   const { accounts, transactions, bills, upcoming } = useFinanceStore.getState();
   return {
@@ -396,18 +410,22 @@ const buildContext = (): ChatContext => {
     recent: transactions.slice(0, 20).map((transaction) => ({
       title: transaction.description,
       ...(transaction.merchant !== null ? { merchant: transaction.merchant } : {}),
-      amount: transaction.amountCents,
+      amount: toDollars(transaction.amountCents),
       category: transaction.category,
     })),
     bills: bills.slice(0, CONTEXT_BILLS_CAP).map((bill) => ({
       vendor: bill.vendor,
-      amount: bill.amountCents,
+      amount: toDollars(bill.amountCents),
       frequency: bill.frequency,
+      nonNegotiable: bill.nonNegotiable,
+      endDate: bill.endDate,
+      installmentsRemaining: bill.installmentsRemaining,
+      method: bill.method,
     })),
     upcoming: upcoming.slice(0, CONTEXT_UPCOMING_CAP).map((payment) => ({
       name: payment.name,
       dueDate: payment.dueDate,
-      amount: payment.amountCents,
+      amount: toDollars(payment.amountCents),
     })),
   };
 };

@@ -299,8 +299,8 @@ export const buildBaseDataset = (now: number): MockDataset => {
   ];
 
   const bills: BillDigest[] = [
-    { id: 'bill_electric', vendor: 'City Utilities', amountCents: 8_740, frequency: 'monthly', nonNegotiable: false },
-    { id: 'bill_rent', vendor: 'Riverside Apartments', amountCents: 145_000, frequency: 'monthly', nonNegotiable: true },
+    { id: 'bill_electric', vendor: 'City Utilities', amountCents: 8_740, frequency: 'monthly', nonNegotiable: false, endDate: null, installmentsRemaining: null, method: null },
+    { id: 'bill_rent', vendor: 'Riverside Apartments', amountCents: 145_000, frequency: 'monthly', nonNegotiable: true, endDate: null, installmentsRemaining: null, method: null },
   ];
 
   const goals: SavingsGoal[] = [

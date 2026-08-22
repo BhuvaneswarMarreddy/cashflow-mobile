@@ -594,8 +594,10 @@ describe('sendChatTurn', () => {
         categories: CATEGORIES.map((c) => c.value),
         accounts: ['Everyday Checking', 'Sapphire Card'],
         recent: [
-          { title: 'STARBUCKS', merchant: 'Starbucks', amount: -650, category: 'food' },
-          { title: 'POS DEBIT', amount: -1200, category: 'shopping' },
+          // Dollars on the wire: the server prints context amounts with
+          // toFixed(2), so cents here read back as 100x the real figure.
+          { title: 'STARBUCKS', merchant: 'Starbucks', amount: -6.5, category: 'food' },
+          { title: 'POS DEBIT', amount: -12, category: 'shopping' },
         ],
         bills: [],
         upcoming: [],
@@ -627,7 +629,7 @@ describe('sendChatTurn', () => {
       accounts: [],
       transactions: [],
       bills: [
-        { id: 'b1', vendor: 'City Utilities', amountCents: 8_740, frequency: 'monthly', nonNegotiable: false },
+        { id: 'b1', vendor: 'City Utilities', amountCents: 8_740, frequency: 'monthly', nonNegotiable: false, endDate: null, installmentsRemaining: null, method: null },
       ],
       upcoming: [
         {
@@ -649,11 +651,20 @@ describe('sendChatTurn', () => {
     await sendChatTurn({ message: 'what are my recurring payments?', history: [] });
 
     const sent = callable.mock.calls[0][0];
+    // Dollars, not cents: the server prints these with toFixed(2).
     expect(sent.context.bills).toEqual([
-      { vendor: 'City Utilities', amount: 8_740, frequency: 'monthly' },
+      {
+        vendor: 'City Utilities',
+        amount: 87.4,
+        frequency: 'monthly',
+        nonNegotiable: false,
+        endDate: null,
+        installmentsRemaining: null,
+        method: null,
+      },
     ]);
     expect(sent.context.upcoming).toEqual([
-      { name: 'City Utilities', dueDate: '2026-08-25', amount: 8_740 },
+      { name: 'City Utilities', dueDate: '2026-08-25', amount: 87.4 },
     ]);
   });
 
@@ -667,6 +678,9 @@ describe('sendChatTurn', () => {
         amountCents: 100,
         frequency: 'monthly' as const,
         nonNegotiable: false,
+        endDate: null,
+        installmentsRemaining: null,
+        method: null,
       })),
       upcoming: Array.from({ length: 35 }, (_, i) => ({
         id: `u${i}`,

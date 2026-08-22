@@ -288,6 +288,12 @@ describe('parseChatAction', () => {
         action: 'answer',
         explanation: "I can't do that from the phone yet.",
       });
+      // Sub-cent: survives `> 0` but rounds to a $0.00 write the server
+      // ignores — must be rejected at the parser, the only gate.
+      expect(parseChatAction({ action: 'set_monthly_spend', amount: 0.001, reason: 'r' })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
     });
 
     it('rejects an amount over the 1,000,000 cap', () => {

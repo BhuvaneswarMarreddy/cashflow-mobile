@@ -138,7 +138,10 @@ const parseSetMonthlySpend = (raw: Record<string, unknown>): ChatAction | null =
   if (
     typeof amount !== 'number' ||
     !Number.isFinite(amount) ||
-    amount <= 0 ||
+    // A whole cent is the floor: 0.001 would survive `> 0`, render as
+    // "$0.00 a month" and round to a zero write the server then ignores —
+    // an "applied" card that changed nothing.
+    amount < 0.01 ||
     amount > MAX_ASSUMED_SPEND
   ) {
     return null;

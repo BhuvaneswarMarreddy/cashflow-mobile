@@ -193,6 +193,7 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
         lockedMonthlyCents: 0,
         avgMonthlySpendCents: 0,
         avgMonthlyIncomeCents: 0,
+        assumedMonthlySpendCents: null,
         lastBankSyncAt: null,
         includePending: false,
         nextPaycheck: null,

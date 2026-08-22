@@ -131,6 +131,15 @@ export interface FinancialSnapshot {
   avgMonthlySpendCents: number;
   avgMonthlyIncomeCents: number;
   /**
+   * CHAT-SPEND-001: the owner's own monthly-spend assumption, from
+   * `settings.assumedMonthlySpend`, in cents. `null` means no override — the
+   * runway above is the server's measured figure. When set, the server has
+   * already substituted it into `avgMonthlySpendCents` and the runway maths;
+   * this field exists only so the UI can mark that figure as an assumption,
+   * not a measurement.
+   */
+  assumedMonthlySpendCents: number | null;
+  /**
    * When the banks were last actually reached (`meta/plaid.lastSuccess`).
    *
    * A property of the SYNC, not of an account: one Plaid run covers every

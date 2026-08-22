@@ -1,9 +1,11 @@
 import * as ImagePicker from 'expo-image-picker';
 
 import { AppError } from '@/errors';
+import { CATEGORIES } from '@/features/activity/categories';
+import { useFinanceStore } from '@/store/financeStore';
 import { fireEvent, renderWithProviders, waitFor } from '@/test/render';
 
-import { createBill, setAssumedMonthlySpend } from '@/data/accountsWrite';
+import { addCategory, createBill, renameCategory, setAssumedMonthlySpend } from '@/data/accountsWrite';
 import { sendChatTurn } from '@/data/chat';
 import { applyMerchantRule, undoDecision } from '@/data/decisions';
 
@@ -29,6 +31,8 @@ jest.mock('@/data/decisions', () => ({
 jest.mock('@/data/accountsWrite', () => ({
   setAssumedMonthlySpend: jest.fn(),
   createBill: jest.fn(),
+  addCategory: jest.fn(),
+  renameCategory: jest.fn(),
 }));
 
 jest.mock('expo-image-picker', () => ({
@@ -40,6 +44,8 @@ const mockApply = applyMerchantRule as jest.Mock;
 const mockUndo = undoDecision as jest.Mock;
 const mockSetAssumedMonthlySpend = setAssumedMonthlySpend as jest.Mock;
 const mockCreateBill = createBill as jest.Mock;
+const mockAddCategory = addCategory as jest.Mock;
+const mockRenameCategory = renameCategory as jest.Mock;
 const mockPick = ImagePicker.launchImageLibraryAsync as jest.Mock;
 
 /** A base64 string that decodes to `bytes` bytes, no padding. */
@@ -52,6 +58,7 @@ const rule = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  useFinanceStore.setState({ categories: [] });
 });
 
 const renderSheet = (onClose = jest.fn()) =>
@@ -385,6 +392,155 @@ describe('ChatSheet', () => {
     await waitFor(() => expect(getByText("Cashflow couldn't save that bill.")).toBeTruthy());
     // The card stays actionable — a busy guard, not a dead end.
     expect(getByTestId('chat-bill-apply')).toBeTruthy();
+  });
+
+  describe('cashflow-mobile#24: category verbs', () => {
+    it('an add_category action renders a proposal card with Apply and Dismiss', async () => {
+      mockSend.mockResolvedValue({
+        action: 'add_category',
+        label: 'Vacations',
+        icon: '🏖️',
+        reason: 'You asked to track vacations separately.',
+      });
+      const { getByTestId, getByText } = await renderSheet();
+
+      await fireEvent.changeText(getByTestId('chat-input'), 'add a vacations category');
+      await fireEvent.press(getByTestId('chat-send'));
+
+      await waitFor(() => expect(getByText('Add "Vacations" as a category 🏖️')).toBeTruthy());
+      expect(getByText('You asked to track vacations separately.')).toBeTruthy();
+      expect(getByTestId('chat-category-apply')).toBeTruthy();
+      expect(getByTestId('chat-category-dismiss')).toBeTruthy();
+    });
+
+    it('Apply calls addCategory with label and icon, and swaps to a saved state', async () => {
+      mockSend.mockResolvedValue({ action: 'add_category', label: 'Vacations', icon: '🏖️', reason: 'r' });
+      mockAddCategory.mockResolvedValue('vacations');
+      const { getByTestId, getByText, queryByTestId } = await renderSheet();
+
+      await fireEvent.changeText(getByTestId('chat-input'), 'add a vacations category');
+      await fireEvent.press(getByTestId('chat-send'));
+      await waitFor(() => expect(getByTestId('chat-category-apply')).toBeTruthy());
+
+      await fireEvent.press(getByTestId('chat-category-apply'));
+
+      await waitFor(() => expect(mockAddCategory).toHaveBeenCalledTimes(1));
+      expect(mockAddCategory).toHaveBeenCalledWith('Vacations', '🏖️');
+
+      await waitFor(() =>
+        expect(getByText('Saved — added "Vacations" as a category.')).toBeTruthy(),
+      );
+      expect(queryByTestId('chat-category-apply')).toBeNull();
+      // No Undo verb exists server-side for categories — this card never offers one.
+      expect(queryByTestId('chat-category-undo')).toBeNull();
+    });
+
+    it('Dismiss on an add_category proposal keeps the chat open and does not write', async () => {
+      mockSend.mockResolvedValue({ action: 'add_category', label: 'Vacations', reason: 'r' });
+      const onClose = jest.fn();
+      const { getByTestId, queryByTestId } = await renderSheet(onClose);
+
+      await fireEvent.changeText(getByTestId('chat-input'), 'add a vacations category');
+      await fireEvent.press(getByTestId('chat-send'));
+      await waitFor(() => expect(getByTestId('chat-category-dismiss')).toBeTruthy());
+
+      await fireEvent.press(getByTestId('chat-category-dismiss'));
+
+      expect(mockAddCategory).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(queryByTestId('chat-category-apply')).toBeNull();
+    });
+
+    it('shows the AppError userMessage on an add_category write failure and allows retrying Apply', async () => {
+      mockSend.mockResolvedValue({ action: 'add_category', label: 'Vacations', reason: 'r' });
+      mockAddCategory.mockRejectedValueOnce(
+        new AppError({ category: 'data', userMessage: "Cashflow couldn't save that category." }),
+      );
+      const { getByTestId, getByText } = await renderSheet();
+
+      await fireEvent.changeText(getByTestId('chat-input'), 'add a vacations category');
+      await fireEvent.press(getByTestId('chat-send'));
+      await waitFor(() => expect(getByTestId('chat-category-apply')).toBeTruthy());
+
+      await fireEvent.press(getByTestId('chat-category-apply'));
+
+      await waitFor(() => expect(getByText("Cashflow couldn't save that category.")).toBeTruthy());
+      expect(getByTestId('chat-category-apply')).toBeTruthy();
+    });
+
+    it('a rename_category action renders the current label being renamed to the new one', async () => {
+      useFinanceStore.setState({
+        categories: [...CATEGORIES, { value: 'vacations', label: 'Vacations', icon: '🏖️' }],
+      });
+      mockSend.mockResolvedValue({
+        action: 'rename_category',
+        value: 'vacations',
+        label: 'Trips',
+        reason: 'You asked to rename it.',
+      });
+      const { getByTestId, getByText } = await renderSheet();
+
+      await fireEvent.changeText(getByTestId('chat-input'), 'rename vacations to trips');
+      await fireEvent.press(getByTestId('chat-send'));
+
+      await waitFor(() => expect(getByText('Rename "Vacations" to "Trips"')).toBeTruthy());
+      expect(getByTestId('chat-category-apply')).toBeTruthy();
+    });
+
+    it('Apply calls renameCategory with value and the new label, and swaps to a saved state', async () => {
+      useFinanceStore.setState({
+        categories: [...CATEGORIES, { value: 'vacations', label: 'Vacations' }],
+      });
+      mockSend.mockResolvedValue({
+        action: 'rename_category',
+        value: 'vacations',
+        label: 'Trips',
+        reason: 'r',
+      });
+      mockRenameCategory.mockResolvedValue(undefined);
+      const { getByTestId, getByText, queryByTestId } = await renderSheet();
+
+      await fireEvent.changeText(getByTestId('chat-input'), 'rename vacations to trips');
+      await fireEvent.press(getByTestId('chat-send'));
+      await waitFor(() => expect(getByTestId('chat-category-apply')).toBeTruthy());
+
+      await fireEvent.press(getByTestId('chat-category-apply'));
+
+      await waitFor(() => expect(mockRenameCategory).toHaveBeenCalledTimes(1));
+      expect(mockRenameCategory).toHaveBeenCalledWith('vacations', 'Trips');
+
+      await waitFor(() => expect(getByText('Saved — renamed to "Trips".')).toBeTruthy());
+      expect(queryByTestId('chat-category-apply')).toBeNull();
+    });
+
+    it('a remove_category action renders as plain text naming the category, never a card', async () => {
+      useFinanceStore.setState({
+        categories: [...CATEGORIES, { value: 'vacations', label: 'Vacations' }],
+      });
+      mockSend.mockResolvedValue({
+        action: 'remove_category',
+        value: 'vacations',
+        reassignTo: 'other',
+        reason: 'You asked to remove it.',
+      });
+      const { getByTestId, getByText, queryByTestId } = await renderSheet();
+
+      await fireEvent.changeText(getByTestId('chat-input'), 'remove the vacations category');
+      await fireEvent.press(getByTestId('chat-send'));
+
+      await waitFor(() =>
+        expect(
+          getByText(
+            'Removing "Vacations" isn\'t something Cashflow can do from the phone yet — it means ' +
+              'moving every transaction, rule and bill filed under it first. Do this from the web app for now.',
+          ),
+        ).toBeTruthy(),
+      );
+      // Never a card, never a write path — no Apply button exists for this action at all.
+      expect(queryByTestId('chat-category-apply')).toBeNull();
+      expect(mockAddCategory).not.toHaveBeenCalled();
+      expect(mockRenameCategory).not.toHaveBeenCalled();
+    });
   });
 
   it('shows the AppError userMessage inline on a send failure, with a retry', async () => {

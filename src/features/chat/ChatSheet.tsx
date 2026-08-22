@@ -4,13 +4,14 @@ import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 
 import { AppText, BottomSheet, Button, Card, IconButton, ListRow } from '@/components';
-import { setAssumedMonthlySpend } from '@/data/accountsWrite';
-import { sendChatTurn, type ChatAction, type ChatMessage } from '@/data/chat';
+import { createBill, setAssumedMonthlySpend } from '@/data/accountsWrite';
+import { resolveBillAnchor, sendChatTurn, type ChatAction, type ChatMessage } from '@/data/chat';
 import { applyMerchantRule, undoDecision, type ApplyDecisionResult } from '@/data/decisions';
 import { isAppError } from '@/errors';
 import { CATEGORIES } from '@/features/activity/categories';
 import { useTheme } from '@/theme';
 import type { Theme } from '@/theme';
+import type { BillFrequency } from '@/types';
 import { formatCurrency } from '@/utils/format';
 import { createId } from '@/utils/id';
 
@@ -38,6 +39,18 @@ type SpendProposalState =
   | { phase: 'undone' }
   | { phase: 'dismissed' };
 
+/**
+ * No `undone` here: `createBill` has no server-side Undo verb (unlike a rule
+ * or a spend assumption), so this state machine never fakes one — the applied
+ * copy points at the web Bills tab instead. See `applyBillProposal`.
+ */
+type BillProposalState =
+  | { phase: 'pending' }
+  | { phase: 'applying' }
+  | { phase: 'error'; message: string }
+  | { phase: 'applied' }
+  | { phase: 'dismissed' };
+
 // Headroom under the server's 10MB request cap (see task-chat-brief.md).
 const MAX_IMAGE_BYTES = 9 * 1024 * 1024;
 
@@ -55,7 +68,22 @@ type Entry =
   | { id: string; kind: 'user'; text: string; image?: { uri: string; mimeType: string } }
   | { id: string; kind: 'text'; text: string }
   | { id: string; kind: 'proposal'; rule: ProposalRule; explanation: string; state: ProposalState }
-  | { id: string; kind: 'spend-proposal'; amountCents: number; reason: string; state: SpendProposalState };
+  | { id: string; kind: 'spend-proposal'; amountCents: number; reason: string; state: SpendProposalState }
+  | {
+      id: string;
+      kind: 'bill-proposal';
+      vendor: string;
+      amountCents: number;
+      frequency: BillFrequency;
+      dueDay?: number;
+      nextDueDate?: string;
+      accountName?: string;
+      endDate?: string;
+      installmentsRemaining?: number;
+      nonNegotiable?: boolean;
+      reason: string;
+      state: BillProposalState;
+    };
 
 type Turn = { message: string; history: ChatMessage[]; image?: { base64: string; mimeType: string } };
 
@@ -102,6 +130,34 @@ const toHistory = (entries: Entry[]): ChatMessage[] =>
     if (entry.kind === 'proposal') return [{ role: 'assistant', content: entry.explanation }];
     return [{ role: 'assistant', content: entry.reason }];
   });
+
+// A figure the owner is confirming — never rounded to whole dollars, unlike
+// formatCurrency's dashboard default. An Apple Card installment of $45.79
+// must not read back as "$46".
+const billAmount = (amountCents: number): string => formatCurrency(amountCents, { whole: false });
+
+/** Cadence line: "Record {vendor} — {amount} {frequency}(, day N)". */
+const describeBillCadence = (
+  entry: Extract<Entry, { kind: 'bill-proposal' }>,
+  anchor: { autopayDay?: number; anchorDate?: string },
+): string =>
+  `Record ${entry.vendor} — ${billAmount(entry.amountCents)} ${entry.frequency}` +
+  (anchor.autopayDay ? ` (day ${anchor.autopayDay})` : '');
+
+/** "which account" + "when it ends", joined — omits whichever half is unknown. */
+const describeBillDetails = (entry: Extract<Entry, { kind: 'bill-proposal' }>): string | null => {
+  const end = entry.endDate
+    ? `ends ${entry.endDate}`
+    : entry.installmentsRemaining
+      ? `${entry.installmentsRemaining} payment${entry.installmentsRemaining === 1 ? '' : 's'} left`
+      : null;
+  const parts = [entry.accountName ?? null, end].filter((part): part is string => part !== null);
+  return parts.length ? parts.join(' · ') : null;
+};
+
+const describeBillApplied = (entry: Extract<Entry, { kind: 'bill-proposal' }>): string =>
+  `Saved — ${entry.vendor} now shows in Upcoming and Bills, ${billAmount(entry.amountCents)} ` +
+  `${entry.frequency}. Edit it from the web app's Bills tab.`;
 
 const bubble = (theme: Theme, key: string, text: string, align: 'flex-end' | 'flex-start') => (
   <View
@@ -195,6 +251,26 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
               id: createId('chat'),
               kind: 'spend-proposal',
               amountCents: Math.round(action.amount * 100),
+              reason: action.reason,
+              state: { phase: 'pending' },
+            },
+          ];
+        }
+        if (action.action === 'record_bill') {
+          return [
+            ...previous,
+            {
+              id: createId('chat'),
+              kind: 'bill-proposal',
+              vendor: action.vendor,
+              amountCents: Math.round(action.amount * 100),
+              frequency: action.frequency,
+              dueDay: action.dueDay,
+              nextDueDate: action.nextDueDate,
+              accountName: action.accountName,
+              endDate: action.endDate,
+              installmentsRemaining: action.installmentsRemaining,
+              nonNegotiable: action.nonNegotiable,
               reason: action.reason,
               state: { phase: 'pending' },
             },
@@ -440,6 +516,118 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
     );
   };
 
+  const updateBillProposal = (id: string, state: BillProposalState) =>
+    setEntries((previous) =>
+      previous.map((entry) =>
+        entry.id === id && entry.kind === 'bill-proposal' ? { ...entry, state } : entry,
+      ),
+    );
+
+  /**
+   * CHAT-BILLS-001. record_bill -> a Bill row via `createBill`. Mirrors the
+   * web's `applyBill`/BillProposalCard: `resolveBillAnchor` is the SAME gate
+   * the card itself checks before ever rendering an Apply button, so a null
+   * here is unreachable in practice — it stays as a defensive guard, not a
+   * new user-facing path.
+   */
+  const applyBillProposal = async (entry: Extract<Entry, { kind: 'bill-proposal' }>) => {
+    if (entry.state.phase === 'applying' || entry.state.phase === 'applied') return;
+    const anchor = resolveBillAnchor(entry);
+    if (!anchor) return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    updateBillProposal(entry.id, { phase: 'applying' });
+    try {
+      await createBill({
+        vendor: entry.vendor,
+        amountCents: entry.amountCents,
+        frequency: entry.frequency,
+        accountName: entry.accountName,
+        autopayDay: anchor.autopayDay,
+        anchorDate: anchor.anchorDate,
+        endDate: entry.endDate,
+        installmentsRemaining: entry.installmentsRemaining,
+        nonNegotiable: entry.nonNegotiable,
+      });
+      updateBillProposal(entry.id, { phase: 'applied' });
+    } catch (error) {
+      const message = isAppError(error) ? error.userMessage : "Cashflow couldn't save that bill.";
+      updateBillProposal(entry.id, { phase: 'error', message });
+    }
+  };
+
+  const dismissBillProposal = (entry: Extract<Entry, { kind: 'bill-proposal' }>) =>
+    updateBillProposal(entry.id, { phase: 'dismissed' });
+
+  const renderBillProposal = (entry: Extract<Entry, { kind: 'bill-proposal' }>) => {
+    const { state } = entry;
+
+    if (state.phase === 'dismissed') return bubble(theme, entry.id, entry.reason, 'flex-start');
+
+    if (state.phase === 'applied') {
+      return (
+        <Card key={entry.id} style={{ alignSelf: 'flex-start', maxWidth: '90%' }}>
+          <AppText variant="body">{describeBillApplied(entry)}</AppText>
+        </Card>
+      );
+    }
+
+    const anchor = resolveBillAnchor(entry);
+    // Anchor rule (server-enforced): a non-monthly cadence with no next due
+    // date has nothing to project a schedule from — the honest state is
+    // asking for it, never a button that would write a silently broken bill.
+    if (!anchor) {
+      return (
+        <Card key={entry.id} style={{ alignSelf: 'flex-start', maxWidth: '90%', gap: theme.spacing.sm }}>
+          <AppText variant="body">
+            {`I don't have a next due date for a ${entry.frequency} bill, so it can't show a ` +
+              "schedule yet — tell me when the next payment is due."}
+          </AppText>
+          <Button
+            label="Dismiss"
+            variant="secondary"
+            onPress={() => dismissBillProposal(entry)}
+            testID="chat-bill-dismiss"
+          />
+        </Card>
+      );
+    }
+
+    const details = describeBillDetails(entry);
+
+    return (
+      <Card key={entry.id} style={{ alignSelf: 'flex-start', maxWidth: '90%', gap: theme.spacing.sm }}>
+        <AppText variant="body">{describeBillCadence(entry, anchor)}</AppText>
+        {details ? (
+          <AppText variant="secondary" tone="textSecondary">
+            {details}
+          </AppText>
+        ) : null}
+        <AppText variant="secondary" tone="textSecondary">
+          {entry.reason}
+        </AppText>
+        {state.phase === 'error' ? errorBanner(state.message) : null}
+        {state.phase === 'applying' ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+            <ActivityIndicator size="small" color={theme.colors.accent} />
+            <AppText variant="secondary" tone="textSecondary">
+              Saving…
+            </AppText>
+          </View>
+        ) : (
+          <View style={{ flexDirection: 'row', gap: theme.spacing.sm }}>
+            <Button label="Apply" onPress={() => void applyBillProposal(entry)} testID="chat-bill-apply" />
+            <Button
+              label="Dismiss"
+              variant="secondary"
+              onPress={() => dismissBillProposal(entry)}
+              testID="chat-bill-dismiss"
+            />
+          </View>
+        )}
+      </Card>
+    );
+  };
+
   const footer = (
     <View style={{ gap: theme.spacing.sm }}>
       {attachError ? errorBanner(attachError) : null}
@@ -530,6 +718,7 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
           }
           if (entry.kind === 'text') return bubble(theme, entry.id, entry.text, 'flex-start');
           if (entry.kind === 'spend-proposal') return renderSpendProposal(entry);
+          if (entry.kind === 'bill-proposal') return renderBillProposal(entry);
           return renderProposal(entry);
         })}
 

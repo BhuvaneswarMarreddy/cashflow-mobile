@@ -1,11 +1,9 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import type { BottomTabBarButtonProps } from '@react-navigation/bottom-tabs';
-import { PlatformPressable } from '@react-navigation/elements';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { NativeStackNavigationOptions } from '@react-navigation/native-stack';
 import { BlurView } from 'expo-blur';
 import { useEffect, useState } from 'react';
-import { Animated, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
+import { Animated, StyleSheet, View } from 'react-native';
 
 import { usageAnalytics } from '@/analytics';
 import { Icon, type IconName } from '@/components';
@@ -139,9 +137,6 @@ const TabBarBackground = () => {
   );
 };
 
-/** Shared with the active pill below, so both settle in the same beat. */
-const TAB_SPRING = { friction: 6, tension: 60 } as const;
-
 /** Springs the active tab's icon up to draw the eye, without reanimated. */
 const TabIcon = ({
   name,
@@ -163,76 +158,18 @@ const TabIcon = ({
       scale.setValue(toValue);
       return;
     }
-    Animated.spring(scale, { toValue, useNativeDriver: true, ...TAB_SPRING }).start();
+    Animated.spring(scale, {
+      toValue,
+      friction: 6,
+      tension: 60,
+      useNativeDriver: true,
+    }).start();
   }, [focused, scale, theme.reduceMotion]);
 
   return (
     <Animated.View style={{ transform: [{ scale }] }}>
       <Icon name={name} size={size} color={color} />
     </Animated.View>
-  );
-};
-
-/**
- * Highlight pill behind the focused tab's icon+label — the Camera app's
- * "PHOTO" mode pill, translated to a vertical icon-over-label tab.
- *
- * A custom `tabBarButton` rather than a custom `tabBarIcon`/`tabBarLabel`:
- * the pill has to sit behind *both*, and those two are rendered as separate
- * elements by the default item — only the button wraps them together. Still
- * the library's own `PlatformPressable` underneath, so press feedback,
- * ripple, and accessibility stay exactly what react-navigation ships.
- *
- * Sized off a real `onLayout` measurement of the icon+label, not a guess —
- * "Home" and "Accounts" need different pill widths, and a fixed size would
- * either clip the long labels or float loose around the short ones. The pill
- * itself is `position: absolute` behind that measured content, so it never
- * touches the row's own flex layout — neighbouring tabs cannot shift.
- */
-const TabBarButton = ({ children, style, ...props }: BottomTabBarButtonProps) => {
-  const theme = useTheme();
-  const focused = props['aria-selected'] === true;
-  const [content, setContent] = useState({ width: 0, height: 0 });
-  const [progress] = useState(() => new Animated.Value(focused ? 1 : 0));
-
-  useEffect(() => {
-    const toValue = focused ? 1 : 0;
-    if (theme.reduceMotion) {
-      progress.setValue(toValue);
-      return;
-    }
-    Animated.spring(progress, { toValue, useNativeDriver: true, ...TAB_SPRING }).start();
-  }, [focused, progress, theme.reduceMotion]);
-
-  const onLayout = (event: LayoutChangeEvent) => {
-    const { width, height } = event.nativeEvent.layout;
-    setContent({ width, height });
-  };
-
-  return (
-    <PlatformPressable {...props} style={style}>
-      <View onLayout={onLayout} style={{ alignItems: 'center' }}>
-        {content.width > 0 ? (
-          <Animated.View
-            pointerEvents="none"
-            style={{
-              position: 'absolute',
-              top: -theme.spacing.xs,
-              left: -theme.spacing.md,
-              width: content.width + theme.spacing.md * 2,
-              height: content.height + theme.spacing.xs * 2,
-              borderRadius: theme.radius.pill,
-              backgroundColor: theme.colors.tabPill,
-              opacity: progress,
-              transform: [
-                { scale: progress.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] }) },
-              ],
-            }}
-          />
-        ) : null}
-        {children}
-      </View>
-    </PlatformPressable>
   );
 };
 
@@ -257,7 +194,6 @@ export const TabNavigator = () => {
           borderTopColor: theme.colors.border,
         },
         tabBarBackground: () => <TabBarBackground />,
-        tabBarButton: (props) => <TabBarButton {...props} />,
         tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
         tabBarButtonTestID: `tab-${route.name}`,
         tabBarIcon: ({ color, size, focused }) => (

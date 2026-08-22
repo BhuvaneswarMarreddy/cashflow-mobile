@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { RefreshControl, SectionList, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppText, Divider, EmptyState, ErrorState, SkeletonCard, StatusBanner } from '@/components';
+import { CategorizeSheet } from '@/features/activity/CategorizeSheet';
 import { TransactionRow } from '@/features/activity/TransactionRow';
 import { triggerRefresh, usePullToRefresh } from '@/hooks/useRefresh';
 import { useFinanceStore } from '@/store/financeStore';
@@ -43,6 +45,11 @@ export const TransactionsList = () => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { refreshing, onRefresh } = usePullToRefresh();
+
+  // Owned here, not in CategorizeSheet: this is the one screen that knows
+  // which row was long-pressed, and the sheet itself works from whatever
+  // transaction (or null) it is handed.
+  const [categorizing, setCategorizing] = useState<Transaction | null>(null);
 
   const transactions = useFinanceStore((state) => state.transactions);
   const accounts = useFinanceStore((state) => state.accounts);
@@ -126,6 +133,7 @@ export const TransactionsList = () => {
             {...(nameFor(item.accountId) !== undefined
               ? { accountName: nameFor(item.accountId) as string }
               : {})}
+            onLongPress={() => setCategorizing(item)}
           />
         )}
         ItemSeparatorComponent={() => <Divider inset={theme.spacing.huge + theme.spacing.lg} />}
@@ -144,6 +152,8 @@ export const TransactionsList = () => {
           )
         }
       />
+
+      <CategorizeSheet transaction={categorizing} onClose={() => setCategorizing(null)} />
     </View>
   );
 };

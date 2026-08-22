@@ -1,6 +1,6 @@
 import { BottomTabBarHeightContext } from '@react-navigation/bottom-tabs';
-import { useContext, useEffect, useState } from 'react';
-import { Animated, Pressable, StyleSheet, View } from 'react-native';
+import { useContext, useEffect, useRef, useState } from 'react';
+import { Animated, Modal, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 
@@ -56,14 +56,37 @@ const ROW = MINI_SIZE + GAP;
  * edge sits at `49 + 16 (spacing.lg) + 56 (FAB) + 4 * 56 (ROW×4)` ≈ 345pt off
  * the bottom of the screen — comfortably clear of the ~90pt header, with N=4
  * as the worst case today. No cap or scroll needed unless that count grows.
+ *
+ * The open fan (backdrop + mini buttons) renders inside a `Modal`, not as a
+ * sibling in the screen's own view tree: a plain sibling paints *below* the
+ * floating glass tab bar (a sibling at the navigator level, rendered after
+ * screen content), so the bar stayed reachable — both to a finger and to
+ * VoiceOver — while the dial was open. A `Modal` is its own native window
+ * above everything else in the app, so the tab bar and the rest of the
+ * screen are genuinely unreachable while it is up. The toggle button itself
+ * stays outside the `Modal`, in its usual spot, so its own tap target never
+ * moves.
+ *
+ * Because the `Modal`'s coordinate space is the device screen rather than
+ * wherever this component happens to sit, the fan is positioned from the
+ * toggle's real on-screen box — measured off the toggle via `onLayout` +
+ * `measureInWindow` — rather than assumed to share an origin with it. The
+ * `right`/`bottom` tab-bar-height formula below is both the toggle's own
+ * position AND the fallback anchor for the brief window before the first
+ * measurement lands (and for tests, where a real `onLayout` never fires) —
+ * so the visual position is identical either way.
  */
 export const FAB = ({ actions, source, icon = 'plus', label }: Props) => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const tabBarHeight = useContext(BottomTabBarHeightContext) ?? 0;
   const keyboardVisible = useKeyboardVisible();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [open, setOpen] = useState(false);
   const [rotation] = useState(() => new Animated.Value(0));
+  const toggleRef = useRef<View>(null);
+  /** The toggle's real on-screen box, in the `Modal`'s window coordinates. */
+  const [anchor, setAnchor] = useState<{ right: number; bottom: number } | null>(null);
 
   useEffect(() => {
     const toValue = open ? 1 : 0;
@@ -86,6 +109,18 @@ export const FAB = ({ actions, source, icon = 'plus', label }: Props) => {
   // same source AppScreen's bottom padding reads, so the two stay in sync.
   const bottom = (tabBarHeight > 0 ? tabBarHeight : insets.bottom) + theme.spacing.lg;
 
+  // Re-measured on every layout pass the toggle goes through — mount,
+  // tab-bar-height changes, keyboard visibility — so it never goes stale.
+  const measureAnchor = () => {
+    toggleRef.current?.measureInWindow((x, y, width) => {
+      setAnchor({ right: windowWidth - x - width, bottom: windowHeight - y });
+    });
+  };
+
+  // Falls back to the toggle's own formula until the first measurement lands.
+  const fanRight = anchor?.right ?? theme.spacing.lg;
+  const fanBottom = anchor?.bottom ?? bottom + FAB_SIZE;
+
   const toggle = () => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     usageAnalytics.track('fab.selected', source, { target: open ? 'close-menu' : 'open-menu' });
@@ -103,33 +138,49 @@ export const FAB = ({ actions, source, icon = 'plus', label }: Props) => {
 
   return (
     <>
-      {open ? (
-        // Sibling of the mini buttons and the toggle, not a parent — same
-        // reasoning as BottomSheet's backdrop: a Pressable ancestor would
-        // swallow taps meant for them.
-        // ponytail: scoped to this screen's own view tree, so it paints below
-        // the floating glass tab bar (a sibling at the navigator level,
-        // rendered after screen content). Accepted — the fan sits well above
-        // the bar already; wrap in a Modal like BottomSheet if that ever needs
-        // to dim too.
+      {/* transparent + statusBarTranslucent: a real window above the whole
+          app, tab bar included. animationType "none" — the toggle's own
+          Animated.spring (already reduceMotion-aware, above) is the only
+          motion the open/close transition gets; a second, non-reduceMotion-
+          aware fade from the Modal itself would fight it. */}
+      <Modal
+        visible={open}
+        transparent
+        statusBarTranslucent
+        animationType="none"
+        onRequestClose={() => setOpen(false)}
+      >
+        {/* Sibling of the trapped content below, not its parent — same
+            reasoning as BottomSheet's backdrop: a Pressable ancestor would
+            claim the touch responder before the mini buttons could. Also
+            deliberately OUTSIDE accessibilityViewIsModal: VoiceOver can't
+            swipe to it, but a sighted tap still reaches it, same as
+            BottomSheet's backdrop. */}
         <Pressable
           onPress={() => setOpen(false)}
           accessibilityRole="button"
           accessibilityLabel="Close quick actions"
           testID="fab-backdrop"
-          style={StyleSheet.absoluteFill}
+          style={[StyleSheet.absoluteFill, { backgroundColor: theme.colors.overlay }]}
         />
-      ) : null}
 
-      {open
-        ? actions.map((action, index) => (
+        {/* Traps VoiceOver focus to the mini buttons while the fan is open —
+            without this, a screen-reader user could swipe past the backdrop
+            into the screen content sitting behind it. */}
+        <View
+          accessibilityViewIsModal
+          pointerEvents="box-none"
+          testID="fab-fan"
+          style={StyleSheet.absoluteFill}
+        >
+          {actions.map((action, index) => (
             <View
               key={action.key}
               pointerEvents="box-none"
               style={{
                 position: 'absolute',
-                right: theme.spacing.lg,
-                bottom: bottom + FAB_SIZE + GAP + index * ROW,
+                right: fanRight,
+                bottom: fanBottom + GAP + index * ROW,
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: theme.spacing.sm,
@@ -152,6 +203,7 @@ export const FAB = ({ actions, source, icon = 'plus', label }: Props) => {
                 onPress={() => select(action)}
                 accessibilityRole="button"
                 accessibilityLabel={action.label}
+                accessibilityHint={action.description}
                 testID={`fab-action-${action.key}`}
                 style={({ pressed }) => ({
                   width: MINI_SIZE,
@@ -167,10 +219,13 @@ export const FAB = ({ actions, source, icon = 'plus', label }: Props) => {
                 <Icon name={action.icon} size={20} color={theme.colors.accent} />
               </Pressable>
             </View>
-          ))
-        : null}
+          ))}
+        </View>
+      </Modal>
 
       <View
+        ref={toggleRef}
+        onLayout={measureAnchor}
         pointerEvents="box-none"
         style={{ position: 'absolute', right: theme.spacing.lg, bottom }}
       >

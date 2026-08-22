@@ -1,9 +1,14 @@
-import { Animated } from 'react-native';
+import { Animated, StyleSheet } from 'react-native';
 import * as Haptics from 'expo-haptics';
 
+import { colorsFor } from '@/theme/tokens';
 import { fireEvent, renderWithProviders } from '@/test/render';
 
 import { FAB, type FabAction } from '../FAB';
+
+/** Either scheme's overlay is a valid scrim — which one is active is the
+ *  ThemeProvider's call, not this suite's. */
+const OVERLAY_COLORS = [colorsFor('light').overlay, colorsFor('dark').overlay];
 
 const action = (overrides: Partial<FabAction> = {}): FabAction => ({
   key: 'ask-ai',
@@ -69,6 +74,36 @@ describe('FAB', () => {
     expect(queryByTestId('fab-action-refresh')).toBeNull();
   });
 
+  it('traps VoiceOver focus to the fan and gives the backdrop a real scrim', async () => {
+    const { getByLabelText, getByTestId } = await renderWithProviders(
+      <FAB actions={[action()]} source="home" />,
+    );
+
+    await fireEvent.press(getByLabelText('Quick actions'));
+
+    expect(getByTestId('fab-fan').props.accessibilityViewIsModal).toBe(true);
+    // RNTL treats the backdrop as accessibility-hidden by default once a
+    // sibling carries accessibilityViewIsModal — correctly: that IS the trap
+    // working, the same reason VoiceOver can't swipe to it either. `hidden`
+    // opts back in, the same way a sighted tap still reaches it.
+    const backdrop = getByTestId('fab-backdrop', { hidden: true });
+    const backdropStyle = StyleSheet.flatten(backdrop.props.style);
+    expect(OVERLAY_COLORS).toContain(backdropStyle.backgroundColor);
+  });
+
+  it('surfaces a mini action\'s description as its accessibilityHint', async () => {
+    const { getByLabelText, getByTestId } = await renderWithProviders(
+      <FAB
+        actions={[action({ key: 'refresh', label: 'Refresh now', description: 'Pull the latest data' })]}
+        source="home"
+      />,
+    );
+
+    await fireEvent.press(getByLabelText('Quick actions'));
+
+    expect(getByTestId('fab-action-refresh').props.accessibilityHint).toBe('Pull the latest data');
+  });
+
   it('tapping the backdrop closes the fan without firing any action', async () => {
     const onPress = jest.fn();
     const { getByLabelText, getByTestId, queryByTestId } = await renderWithProviders(
@@ -78,7 +113,11 @@ describe('FAB', () => {
     await fireEvent.press(getByLabelText('Quick actions'));
     expect(getByTestId('fab-action-ask-ai')).toBeTruthy();
 
-    await fireEvent.press(getByTestId('fab-backdrop'));
+    // See the a11y-trap test above: the backdrop is deliberately outside the
+    // accessibilityViewIsModal boundary, so it is accessibility-hidden by
+    // RNTL's default query. `hidden` finds it anyway — a sighted/mouse tap
+    // reaches it exactly the same way.
+    await fireEvent.press(getByTestId('fab-backdrop', { hidden: true }));
 
     expect(onPress).not.toHaveBeenCalled();
     expect(queryByTestId('fab-action-ask-ai')).toBeNull();

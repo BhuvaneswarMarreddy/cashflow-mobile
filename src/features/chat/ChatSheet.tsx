@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ActivityIndicator, Image, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, ScrollView, TextInput, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -103,7 +103,14 @@ type Entry =
       reason: string;
       state: BillProposalState;
     }
-  | { id: string; kind: 'category-proposal'; category: CategoryProposal; reason: string; state: CategoryProposalState };
+  | { id: string; kind: 'category-proposal'; category: CategoryProposal; reason: string; state: CategoryProposalState }
+  /**
+   * cashflow-mobile#25. A breakdown/comparison answer as a table. No `state`
+   * at all — unlike every proposal kind above, a report is never pending,
+   * applying, applied or dismissed: the table itself IS the whole answer, so
+   * this can never render an Apply/Undo affordance.
+   */
+  | { id: string; kind: 'report'; title: string; columns: string[]; rows: (string | number)[][]; note?: string };
 
 type Turn = { message: string; history: ChatMessage[]; image?: { base64: string; mimeType: string } };
 
@@ -149,6 +156,41 @@ const describeCategoryRemoval = (categories: readonly CategoryOption[], value: s
   `Removing "${categoryLabel(categories, value)}" isn't something Cashflow can do from the phone yet — ` +
   'it means moving every transaction, rule and bill filed under it first. Do this from the web app for now.';
 
+/**
+ * cashflow-mobile#25. Plain numbers only — the server never sends a currency
+ * symbol (a report cell can be a count, not money; `AmountText` would invent
+ * one), so this only adds thousands grouping and caps at 2 decimals, mirroring
+ * the web app's `ReportCard` (`toLocaleString(undefined, { maximumFractionDigits: 2 })`,
+ * pinned to 'en-US' here for deterministic rendering across locales).
+ */
+const formatReportCell = (cell: string | number): string =>
+  typeof cell === 'number' ? cell.toLocaleString('en-US', { maximumFractionDigits: 2 }) : cell;
+
+/** "Category: Groceries, Spent: 412.5" — one VoiceOver stop per row instead
+ *  of a swipe per cell; a raw grid of Text nodes reads as noise. */
+const reportRowLabel = (columns: string[], row: (string | number)[]): string =>
+  columns.map((column, i) => `${column}: ${formatReportCell(row[i])}`).join(', ');
+
+const REPORT_CELL_MIN = 64;
+const REPORT_CELL_MAX = 160;
+// ponytail: a rough char-count width, not a real text measurement — good
+// enough to keep a numeric column narrow and a merchant-name column roomier
+// without a native measuring pass. Upgrade to onLayout-measured widths if a
+// column ever visibly clips a value that fits within MAX_REPORT_CELL (40 chars).
+const REPORT_CHAR_WIDTH = 7;
+
+/**
+ * Per-column pixel width from its longest rendered cell (header included),
+ * clamped to [MIN, MAX] so one column can never eat the whole horizontal
+ * scroll nor collapse to nothing. Same width is used for the header row and
+ * every data row, so columns line up despite each row being its own View.
+ */
+const reportColumnWidths = (columns: string[], rows: (string | number)[][]): number[] =>
+  columns.map((column, i) => {
+    const longest = Math.max(column.length, ...rows.map((row) => formatReportCell(row[i]).length), 1);
+    return Math.min(REPORT_CELL_MAX, Math.max(REPORT_CELL_MIN, longest * REPORT_CHAR_WIDTH));
+  });
+
 const describeSpendProposal = (amountCents: number): string =>
   `Assume ${formatCurrency(amountCents)} a month for runway`;
 
@@ -171,6 +213,9 @@ const toHistory = (entries: Entry[]): ChatMessage[] =>
   entries.flatMap((entry): ChatMessage[] => {
     if (entry.kind === 'user') return [{ role: 'user', content: entry.text }];
     if (entry.kind === 'text') return [{ role: 'assistant', content: entry.text }];
+    // No `state` on a report entry (see the Entry union doc comment) — its
+    // title is the closest thing it has to what `text`/proposals contribute.
+    if (entry.kind === 'report') return [{ role: 'assistant', content: entry.title }];
     if (entry.state.phase === 'dismissed') return [];
     if (entry.kind === 'proposal') return [{ role: 'assistant', content: entry.explanation }];
     return [{ role: 'assistant', content: entry.reason }];
@@ -347,6 +392,19 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
               category: { kind: 'rename', value: action.value, label: action.label },
               reason: action.reason,
               state: { phase: 'pending' },
+            },
+          ];
+        }
+        if (action.action === 'report') {
+          return [
+            ...previous,
+            {
+              id: createId('chat'),
+              kind: 'report',
+              title: action.title,
+              columns: action.columns,
+              rows: action.rows,
+              ...(action.note !== undefined ? { note: action.note } : {}),
             },
           ];
         }
@@ -785,6 +843,106 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
     );
   };
 
+  /**
+   * cashflow-mobile#25. report -> a table card. No state machine, no
+   * Apply/Dismiss/Undo: unlike every proposal above, the table itself IS the
+   * whole answer, so this function is the entire lifecycle.
+   *
+   * Nested horizontal `ScrollView` inside `BottomSheet`'s own vertical one is
+   * the standard RN answer for a wide table on a narrow sheet — perpendicular
+   * pan directions don't fight over the gesture responder the way two
+   * same-axis ScrollViews would. `Sankey.tsx` already relies on the same
+   * mechanism elsewhere in this app. Caveat: that is verified here only
+   * structurally (renders without error, `horizontal` is set) — RTL does not
+   * simulate real pan gestures, so the actual on-device feel still wants a
+   * manual check.
+   *
+   * Row-major layout (a `View` per row, cells inside), not column-major:
+   * VoiceOver reading "Category: Groceries, Spent: 412.50" as one stop is far
+   * more useful than reading down an entire column first. Alignment is
+   * per-CELL, not per-column — mirrors the web app's `ReportCard` (a number
+   * cell renders right-aligned and tabular, a string cell stays left) — and
+   * every cell gets the SAME width per column index (`reportColumnWidths`) so
+   * the header and every row still line up despite each row being an
+   * independent View.
+   */
+  const renderReport = (entry: Extract<Entry, { kind: 'report' }>) => {
+    const widths = reportColumnWidths(entry.columns, entry.rows);
+
+    return (
+      <Card
+        key={entry.id}
+        style={{ alignSelf: 'flex-start', maxWidth: '90%', gap: theme.spacing.sm }}
+        testID="chat-report"
+      >
+        <AppText variant="bodyStrong">{entry.title}</AppText>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator>
+          <View>
+            <View
+              accessible
+              accessibilityLabel={`Columns: ${entry.columns.join(', ')}`}
+              style={{
+                flexDirection: 'row',
+                borderBottomWidth: theme.borderWidth.hairline,
+                borderBottomColor: theme.colors.border,
+                paddingBottom: theme.spacing.xs,
+                marginBottom: theme.spacing.xs,
+              }}
+            >
+              {entry.columns.map((column, i) => (
+                <AppText
+                  key={i}
+                  variant="caption"
+                  tone="textSecondary"
+                  numberOfLines={2}
+                  style={{ width: widths[i], textAlign: i === 0 ? 'left' : 'right', paddingRight: theme.spacing.sm }}
+                >
+                  {column}
+                </AppText>
+              ))}
+            </View>
+
+            {entry.rows.map((row, ri) => (
+              <View
+                key={ri}
+                accessible
+                accessibilityLabel={reportRowLabel(entry.columns, row)}
+                style={{ flexDirection: 'row', paddingVertical: theme.spacing.xxs }}
+              >
+                {row.map((cell, ci) => (
+                  <AppText
+                    key={ci}
+                    variant="mono"
+                    // Wraps rather than truncates: every cell gets a FIXED
+                    // per-column width (not flexGrow), so a wrapped cell only
+                    // grows its own row's height — it never shifts any other
+                    // row or column out of alignment. 3 lines covers the
+                    // parser's 40-char cell cap without an unbounded card.
+                    numberOfLines={3}
+                    style={{
+                      width: widths[ci],
+                      textAlign: typeof cell === 'number' ? 'right' : 'left',
+                      paddingRight: theme.spacing.sm,
+                    }}
+                  >
+                    {formatReportCell(cell)}
+                  </AppText>
+                ))}
+              </View>
+            ))}
+          </View>
+        </ScrollView>
+
+        {entry.note ? (
+          <AppText variant="caption" tone="textSecondary">
+            {entry.note}
+          </AppText>
+        ) : null}
+      </Card>
+    );
+  };
+
   const footer = (
     <View style={{ gap: theme.spacing.sm }}>
       {attachError ? errorBanner(attachError) : null}
@@ -877,6 +1035,7 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
           if (entry.kind === 'spend-proposal') return renderSpendProposal(entry);
           if (entry.kind === 'bill-proposal') return renderBillProposal(entry);
           if (entry.kind === 'category-proposal') return renderCategoryProposal(entry);
+          if (entry.kind === 'report') return renderReport(entry);
           return renderProposal(entry);
         })}
 

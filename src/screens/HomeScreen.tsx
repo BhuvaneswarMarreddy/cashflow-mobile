@@ -136,6 +136,7 @@ export const HomeScreen = () => {
           <RunwayHero
             runway={snapshot.runway}
             avgMonthlySpendCents={snapshot.avgMonthlySpendCents}
+            isAssumedSpend={snapshot.assumedMonthlySpendCents !== null}
             onPress={() => {
               usageAnalytics.track('card.opened', 'home', { target: 'runway' });
               navigation.navigate('Tabs', { screen: 'Plan' });

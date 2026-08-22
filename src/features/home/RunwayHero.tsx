@@ -9,6 +9,13 @@ interface Props {
   runway: SnapshotRunway;
   /** Measured monthly burn — what the runway is divided by. */
   avgMonthlySpendCents: number;
+  /**
+   * CHAT-SPEND-001: true when `avgMonthlySpendCents` above is the owner's own
+   * stated assumption (`snapshot.assumedMonthlySpendCents`), not a measured
+   * figure. The caption must say so — an assumption presented as a
+   * measurement is the one thing this card cannot afford to get wrong.
+   */
+  isAssumedSpend: boolean;
   onPress?: () => void;
   testID?: string;
 }
@@ -28,7 +35,7 @@ interface Props {
  *    "6% of your reserve" is a score; "$1,400 buys your first month" is
  *    something to do this week.
  */
-export const RunwayHero = ({ runway, avgMonthlySpendCents, onPress, testID }: Props) => {
+export const RunwayHero = ({ runway, avgMonthlySpendCents, isAssumedSpend, onPress, testID }: Props) => {
   const theme = useTheme();
 
   const spoken = runway.hasBurn
@@ -64,6 +71,7 @@ export const RunwayHero = ({ runway, avgMonthlySpendCents, onPress, testID }: Pr
           <AppText variant="caption" tone="textTertiary">
             Your cash lasts until {formatDate(runway.date, 'medium')} at{' '}
             {formatCurrency(avgMonthlySpendCents)} a month
+            {isAssumedSpend ? ' — your assumption' : ''}
           </AppText>
 
           <View style={{ gap: theme.spacing.xs, marginTop: theme.spacing.xs }}>

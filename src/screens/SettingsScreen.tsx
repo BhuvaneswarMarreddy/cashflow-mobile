@@ -32,7 +32,6 @@ import { summarizeMorning } from '@/services/summarize';
 import { SCENARIO_IDS, SCENARIOS, type ScenarioId } from '@/mocks/scenarios';
 import { useDevStore } from '@/store/devStore';
 import { useFinanceStore } from '@/store/financeStore';
-import { useNotificationsStore } from '@/store/notificationsStore';
 import { useAuthStore } from '@/store/authStore';
 import { usePreferences } from '@/store/preferencesStore';
 import { useTheme, type ThemeMode } from '@/theme';
@@ -175,7 +174,6 @@ export const SettingsScreen = () => {
 
   const dev = useDevStore();
   const snapshot = useFinanceStore((state) => state.snapshot);
-  const unread = useNotificationsStore((state) => state.items.filter((item) => !item.read).length);
 
   const changeSetting = (key: string, apply: () => void) => {
     usageAnalytics.track('settings.changed', 'settings', { settingKey: key });
@@ -190,7 +188,7 @@ export const SettingsScreen = () => {
         >
           <LogoMark size={44} showWordmark />
           <AppText variant="caption" tone="textTertiary">
-            {appConfig.appVersion} · {appConfig.environment}
+            {appConfig.appVersion}
           </AppText>
         </View>
 
@@ -398,20 +396,6 @@ export const SettingsScreen = () => {
           <SectionHeader title="Application" />
           <Card padded={false}>
             <ListRow title="Version" subtitle={appConfig.appVersion} leadingIcon="info" />
-            <Divider inset={theme.spacing.huge + theme.spacing.lg} />
-            <ListRow title="Environment" subtitle={appConfig.environment} leadingIcon="server" />
-            <Divider inset={theme.spacing.huge + theme.spacing.lg} />
-            <ListRow
-              title="Data source"
-              subtitle={flags.ENABLE_MOCK_API ? 'Mock scenarios' : appConfig.apiBaseUrl}
-              leadingIcon="database"
-            />
-            <Divider inset={theme.spacing.huge + theme.spacing.lg} />
-            <ListRow
-              title="Notifications received"
-              subtitle={`${unread} unread`}
-              leadingIcon="bell"
-            />
           </Card>
         </View>
 

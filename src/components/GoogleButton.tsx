@@ -1,6 +1,8 @@
 import type { ComponentType } from 'react';
 import { View, type StyleProp, type ViewStyle } from 'react-native';
 
+import { radius } from '@/theme';
+
 interface Props {
   onPress: () => void;
   disabled?: boolean;
@@ -59,8 +61,11 @@ export const GoogleButton = ({ onPress, disabled = false, color = 'light', testI
 
   return (
     // The native button ignores opacity while disabled, so the wrapper carries
-    // it — otherwise a mid-submit tap looks live.
-    <View style={{ opacity: disabled ? 0.5 : 1 }}>
+    // it — otherwise a mid-submit tap looks live. It also clips the native
+    // view's own corners to the app's control radius, matching Button.
+    <View
+      style={{ opacity: disabled ? 0.5 : 1, borderRadius: radius.control, overflow: 'hidden' }}
+    >
       <Native
         size={Native.Size.Wide}
         color={color}

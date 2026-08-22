@@ -1,6 +1,7 @@
 import { NavigationContainer } from '@react-navigation/native';
 import { render, type RenderOptions } from '@testing-library/react-native';
 import type { ReactElement, ReactNode } from 'react';
+import { AccessibilityInfo } from 'react-native';
 import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context';
 
 import { ThemeProvider } from '@/theme';
@@ -22,10 +23,19 @@ const METRICS: Metrics = {
 interface Options extends Omit<RenderOptions, 'wrapper'> {
   /** Wrap in a NavigationContainer for components that call useNavigation. */
   withNavigation?: boolean;
+  /**
+   * Mocks the OS "Reduce Motion" answer `ThemeProvider` reads on mount, for
+   * tests that assert an animation's reduced-motion path. One-shot (`Once`) so
+   * it never leaks into a later test that renders without this option.
+   */
+  reduceMotion?: boolean;
 }
 
 export const renderWithProviders = (ui: ReactElement, options: Options = {}) => {
-  const { withNavigation = false, ...rest } = options;
+  const { withNavigation = false, reduceMotion, ...rest } = options;
+  if (reduceMotion !== undefined) {
+    jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockResolvedValueOnce(reduceMotion);
+  }
 
   const Wrapper = ({ children }: { children: ReactNode }) => (
     <SafeAreaProvider initialMetrics={METRICS}>

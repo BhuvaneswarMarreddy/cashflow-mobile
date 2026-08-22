@@ -5,22 +5,26 @@ import { usePreferences, type NotificationPreferences } from '@/store/preference
 import type { AppNotification, NotificationCategory } from '@/types';
 import { systemClock, type Clock } from '@/utils/clock';
 
+import { cancelAllScheduled, presentNow, scheduleAt } from './deviceNotifications';
 import { toNotification, type SummaryDraft } from './summarize';
 
 /**
- * Notifications, as a seam.
+ * Notifications.
  *
- * Expo Go cannot deliver remote push, and requiring a development build to see
- * a notification would break the refresh-on-the-phone loop this project is
- * built around. So the default implementation delivers into the in-app
- * notification centre and the log, which is enough to design and test the
- * *content* — the part that actually matters, since the rule here is "summarise,
- * never itemise".
+ * Every delivery does two things: it posts a real iOS notification (see
+ * `deviceNotifications.ts`) and it appends to the in-app centre. The centre is
+ * the LOG — what was said and when — which a banner cannot be, because a banner
+ * is gone the moment it is dismissed and there is no way back to the sentence.
  *
- * To add real delivery later: `npx expo install expo-notifications`, implement
- * this interface over `scheduleNotificationAsync`, and register it in
- * `notificationService`. Nothing else changes. Local notifications work in Expo
- * Go; remote push needs a development build and a project ID.
+ * Delivery is LOCAL. Everything worth saying is already known at refresh time,
+ * so scheduling it on the device costs no push infrastructure and, more
+ * importantly, means a sentence like "17 days of runway" never exists on a
+ * notification server. Remote push would put the owner's figures on Apple's
+ * infrastructure to say something the phone already knew.
+ *
+ * The rule the content follows — summarise, never itemise — lives in
+ * `summarize.ts`, and is the reason this file only ever handles a `SummaryDraft`
+ * rather than a list of transactions.
  */
 export interface NotificationService {
   /** Whether the user has enabled this category in Settings. */
@@ -78,6 +82,11 @@ export const createNotificationService = (
         now: clock.now(),
       });
       useNotificationsStore.getState().add(notification);
+      // Fire-and-forget: the in-app record is the source of truth and must not
+      // depend on the OS accepting the banner. A revoked permission suppresses
+      // the banner and leaves the log intact, which is the correct order of
+      // precedence — the owner can always find what was said.
+      void presentNow({ title: draft.title, body: draft.summary, category: draft.category });
       log.info('notification.presented', {
         ...(notification.correlationId !== null
           ? { correlationId: notification.correlationId }
@@ -95,6 +104,7 @@ export const createNotificationService = (
       if (!isAllowed(draft.category)) return null;
       const id = `sched_${atEpochMs}_${opts.source}`;
       scheduled.set(id, { draft, at: atEpochMs });
+      void scheduleAt({ title: draft.title, body: draft.summary, category: draft.category }, atEpochMs);
       log.info('notification.scheduled', {
         metadata: { id, inMs: atEpochMs - clock.now(), source: opts.source },
       });
@@ -103,6 +113,7 @@ export const createNotificationService = (
 
     cancelAll: () => {
       scheduled.clear();
+      void cancelAllScheduled();
       log.info('notification.all_cancelled');
     },
   };

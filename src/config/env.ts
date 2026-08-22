@@ -20,10 +20,14 @@ const isAppEnvironment = (value: string | undefined): value is AppEnvironment =>
  *   EXPO_PUBLIC_APP_ENV=staging npx expo start
  */
 const resolveEnvironment = (): AppEnvironment => {
+  // A shipped binary is production, no matter what .env said at bundle time.
+  // EXPO_PUBLIC_APP_ENV only picks the flavour of a dev-server session; letting
+  // it leak into a Release archive put the developer panel on TestFlight.
+  if (!__DEV__) return 'production';
   const declared = process.env.EXPO_PUBLIC_APP_ENV;
   if (isAppEnvironment(declared)) return declared;
   if (process.env.NODE_ENV === 'test') return 'test';
-  return __DEV__ ? 'development' : 'production';
+  return 'development';
 };
 
 export const environment: AppEnvironment = resolveEnvironment();

@@ -19,6 +19,8 @@ export interface ThemeColors {
   chrome: string;
   /** Chrome tint laid over the tab bar's blur, so it reads as glass, not fog. */
   chromeGlass: string;
+  /** Highlight pill behind the active tab — neutral, so it never fights the gold tint. */
+  tabPill: string;
   border: string;
   borderStrong: string;
 
@@ -62,6 +64,7 @@ const darkColors: ThemeColors = {
   surfaceAlt: palette.ink[700],
   chrome: palette.ink[900],
   chromeGlass: 'rgba(16, 16, 20, 0.78)',
+  tabPill: 'rgba(255, 255, 255, 0.12)',
   border: palette.ink.border,
   borderStrong: '#3A3A44',
 
@@ -99,6 +102,7 @@ const lightColors: ThemeColors = {
   surfaceAlt: palette.paper[100],
   chrome: palette.paper[50],
   chromeGlass: 'rgba(250, 247, 239, 0.82)',
+  tabPill: 'rgba(23, 21, 15, 0.08)',
   border: palette.paper.border,
   borderStrong: '#D8D0BC',
 

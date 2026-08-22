@@ -5,6 +5,7 @@ import { AppError } from '@/errors';
 import { loggerFor } from '@/logging';
 import { firebaseFunctions, isFirebaseConfigured } from '@/services/firebase';
 import { useFinanceStore } from '@/store/financeStore';
+import type { BillFrequency } from '@/types';
 
 import type { RuleMatch, RuleSet } from './decisions';
 
@@ -32,14 +33,44 @@ export interface ChatContext {
   merchants?: string[];
   accounts?: string[];
   recent?: { title?: string; merchant?: string; amount?: number; category?: string }[];
+  /** CHAT-BILLS-001: the Bills register, so the model can answer "what are my
+   *  recurring payments" and avoid proposing a `record_bill` duplicate. */
+  bills?: {
+    vendor: string;
+    amount: number;
+    frequency: BillFrequency;
+    nonNegotiable?: boolean;
+    endDate?: string | null;
+    installmentsRemaining?: number | null;
+    method?: string | null;
+  }[];
+  /** Projected occurrences (forecast events + the Bills register combined,
+   *  server-side). Dollars, like every other `amount` here (see `buildContext`). */
+  upcoming?: { name: string; dueDate: string; amount: number }[];
   summary?: object;
 }
 
-/** The three shapes mobile v1 acts on. Anything else collapses to `answer` in `parseChatAction`. */
+/** The four shapes mobile v1 acts on. Anything else collapses to `answer` in `parseChatAction`. */
 export type ChatAction =
   | { action: 'answer'; explanation: string }
   | { action: 'create_rule'; rule: { match: RuleMatch; set: RuleSet }; explanation: string }
-  | { action: 'set_monthly_spend'; amount: number; reason: string };
+  | { action: 'set_monthly_spend'; amount: number; reason: string }
+  | {
+      action: 'record_bill';
+      vendor: string;
+      /** Dollars, the amount charged EACH time — never a total or a remaining balance. */
+      amount: number;
+      frequency: BillFrequency;
+      dueDay?: number;
+      /** ISO date of the NEXT payment — the only anchor a non-monthly cadence gets. */
+      nextDueDate?: string;
+      accountName?: string;
+      /** Mutually exclusive with `installmentsRemaining` — at most one end condition. */
+      endDate?: string;
+      installmentsRemaining?: number;
+      nonNegotiable?: boolean;
+      reason: string;
+    };
 
 interface AiChatRequest {
   message?: string;
@@ -149,8 +180,156 @@ const parseSetMonthlySpend = (raw: Record<string, unknown>): ChatAction | null =
   return { action: 'set_monthly_spend', amount, reason };
 };
 
+const BILL_FREQUENCIES = [
+  'weekly',
+  'biweekly',
+  'monthly',
+  'quarterly',
+  'semiannual',
+  'annual',
+] as const;
+
+const RECORD_BILL_KEYS = [
+  'action',
+  'vendor',
+  'amount',
+  'frequency',
+  'dueDay',
+  'nextDueDate',
+  'accountName',
+  'endDate',
+  'installmentsRemaining',
+  'nonNegotiable',
+  'reason',
+] as const;
+
+/** record_bill's own spend cap — mirrors `MAX_ASSUMED_SPEND`'s role for `set_monthly_spend`. */
+const MAX_BILL_AMOUNT = 100_000;
+
+/** firestore.rules bounds vendor at 1..200; mirror it rather than fail at the write. */
+const MAX_VENDOR_LENGTH = 200;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 /**
- * Defensively parses an untrusted `aiChat` result into one of the three
+ * The server accepts an anchor date in [today-7d, today+400d]; anything outside
+ * that is a hallucinated schedule, not a real next payment.
+ */
+const isWithinAnchorWindow = (iso: string, now = Date.now()): boolean => {
+  const at = Date.parse(iso);
+  return at >= now - 7 * DAY_MS && at <= now + 400 * DAY_MS;
+};
+
+const isIsoDate = (value: string): boolean =>
+  /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
+
+/**
+ * Validates `record_bill` against the same wire shape the server's own
+ * `parseChatAction` (cashflow-forecast's `chat-actions.ts`) sends. Mirrors its
+ * bounds — the amount ceiling, dueDay/installmentsRemaining ranges, ISO dates,
+ * the endDate/installmentsRemaining exclusivity — plus mobile's own extra
+ * sub-cent floor on `amount` (see `parseSetMonthlySpend`'s `0.01` floor) so a
+ * $0.001 "bill" can never render a card whose write rounds to a $0.00 amount
+ * `firestore.rules`' `amount > 0` then rejects.
+ */
+const parseRecordBill = (raw: Record<string, unknown>): ChatAction | null => {
+  if (!hasOnlyKeys(raw, RECORD_BILL_KEYS)) return null;
+
+  const { vendor, amount, frequency, reason } = raw;
+  // 200 is firestore.rules' own isValidString bound for vendor: a longer name
+  // parses and renders fine, then has its write rejected forever — a retry
+  // button that can never succeed.
+  if (typeof vendor !== 'string' || vendor.trim().length === 0 || vendor.length > MAX_VENDOR_LENGTH) {
+    return null;
+  }
+  if (typeof reason !== 'string' || reason.trim().length === 0) return null;
+  if (
+    typeof amount !== 'number' ||
+    !Number.isFinite(amount) ||
+    amount < 0.01 ||
+    amount > MAX_BILL_AMOUNT
+  ) {
+    return null;
+  }
+  if (typeof frequency !== 'string' || !(BILL_FREQUENCIES as readonly string[]).includes(frequency)) {
+    return null;
+  }
+
+  let dueDay: number | undefined;
+  if (raw.dueDay !== undefined) {
+    if (
+      typeof raw.dueDay !== 'number' ||
+      !Number.isInteger(raw.dueDay) ||
+      raw.dueDay < 1 ||
+      raw.dueDay > 31
+    ) {
+      return null;
+    }
+    dueDay = raw.dueDay;
+  }
+
+  let nextDueDate: string | undefined;
+  if (raw.nextDueDate !== undefined) {
+    if (typeof raw.nextDueDate !== 'string' || !isIsoDate(raw.nextDueDate)) return null;
+    // Same sanity window as the server parser: a next payment date years out
+    // (or long past) is a hallucination, not a schedule.
+    if (!isWithinAnchorWindow(raw.nextDueDate)) return null;
+    nextDueDate = raw.nextDueDate;
+  }
+
+  let accountName: string | undefined;
+  if (raw.accountName !== undefined) {
+    // present but empty — the model said nothing, don't pretend it did.
+    if (typeof raw.accountName !== 'string' || raw.accountName.trim().length === 0) return null;
+    accountName = raw.accountName;
+  }
+
+  let endDate: string | undefined;
+  if (raw.endDate !== undefined) {
+    if (typeof raw.endDate !== 'string' || !isIsoDate(raw.endDate)) return null;
+    endDate = raw.endDate;
+  }
+
+  let installmentsRemaining: number | undefined;
+  if (raw.installmentsRemaining !== undefined) {
+    if (
+      typeof raw.installmentsRemaining !== 'number' ||
+      !Number.isInteger(raw.installmentsRemaining) ||
+      raw.installmentsRemaining < 1 ||
+      raw.installmentsRemaining > 480
+    ) {
+      return null;
+    }
+    installmentsRemaining = raw.installmentsRemaining;
+  }
+
+  // Either an end date or a payment count, never both — two answers to "when
+  // does this stop" is worse than one, and the model can always ask instead.
+  if (endDate !== undefined && installmentsRemaining !== undefined) return null;
+
+  let nonNegotiable: boolean | undefined;
+  if (raw.nonNegotiable !== undefined) {
+    if (typeof raw.nonNegotiable !== 'boolean') return null;
+    nonNegotiable = raw.nonNegotiable;
+  }
+
+  return {
+    action: 'record_bill',
+    vendor,
+    amount,
+    frequency: frequency as BillFrequency,
+    ...(dueDay !== undefined ? { dueDay } : {}),
+    ...(nextDueDate !== undefined ? { nextDueDate } : {}),
+    ...(accountName !== undefined ? { accountName } : {}),
+    ...(endDate !== undefined ? { endDate } : {}),
+    ...(installmentsRemaining !== undefined ? { installmentsRemaining } : {}),
+    ...(nonNegotiable !== undefined ? { nonNegotiable } : {}),
+    reason,
+  };
+};
+
+/**
+ * Defensively parses an untrusted `aiChat` result into one of the four
  * shapes mobile v1 handles. Anything unrecognised, malformed, or carrying a
  * prototype-pollution key collapses to a plain `answer` — the model's own
  * `explanation`, when it's a safe string, still reaches the user; otherwise a
@@ -176,8 +355,42 @@ export const parseChatAction = (raw: unknown): ChatAction => {
 
   if (raw.action === 'create_rule') return parseCreateRule(raw) ?? fallback();
   if (raw.action === 'set_monthly_spend') return parseSetMonthlySpend(raw) ?? fallback();
+  if (raw.action === 'record_bill') return parseRecordBill(raw) ?? fallback();
 
   return fallback();
+};
+
+/**
+ * Defect 1 parity (cashflow-forecast's `resolveBillAnchor`, DataChatSheet.tsx):
+ * without an anchor, `billUpcomingEvents` (the web's projector) silently
+ * produces ZERO Upcoming events for weekly/biweekly/quarterly/semiannual/
+ * annual — an autopayDay alone can never say WHICH week or WHICH month of the
+ * cycle. `nextDueDate` is the only fix: it becomes `anchorDate` directly, and
+ * its day-of-month becomes `autopayDay` whenever `dueDay` itself is absent.
+ *
+ * Returns `null` exactly when the cadence needs an anchor and nothing
+ * supplies one — the card then renders words, not a broken Apply. `monthly`
+ * is the one cadence that never blocks: no autopayDay at all is "varies", an
+ * existing, intentional state.
+ */
+export const resolveBillAnchor = (proposal: {
+  frequency: BillFrequency;
+  dueDay?: number;
+  nextDueDate?: string;
+}): { autopayDay?: number; anchorDate?: string } | null => {
+  const dayFromNextDueDate = proposal.nextDueDate
+    ? Number(proposal.nextDueDate.slice(8, 10))
+    : undefined;
+  const autopayDay = proposal.dueDay ?? dayFromNextDueDate;
+
+  if (proposal.frequency === 'weekly' || proposal.frequency === 'biweekly') {
+    return proposal.nextDueDate ? { anchorDate: proposal.nextDueDate } : null;
+  }
+  if (proposal.frequency === 'monthly') {
+    return { autopayDay };
+  }
+  // quarterly/semiannual/annual: nextDueDate is the ONLY source of anchorDate.
+  return proposal.nextDueDate ? { autopayDay, anchorDate: proposal.nextDueDate } : null;
 };
 
 const callableOrThrow = () => {
@@ -193,17 +406,48 @@ const callableOrThrow = () => {
   return firebaseFunctions();
 };
 
-/** Categories list, account names, and the most recent transactions — no summary in v1. */
+// Caps mirror `recent`'s 20 — compact context, not the whole register.
+const CONTEXT_BILLS_CAP = 30;
+const CONTEXT_UPCOMING_CAP = 30;
+
+/**
+ * Categories list, account names, recent transactions, the Bills register and
+ * upcoming occurrences — no summary in v1. `bills`/`upcoming` let the model
+ * answer "what are my recurring payments" and avoid proposing a `record_bill`
+ * duplicate (CHAT-BILLS-001).
+ *
+ * UNITS: every `amount` here is DOLLARS, because the server renders them with
+ * `money()` = `toFixed(2)` (functions/src/prompts.ts) and prints the number it
+ * is given. Sending this app's native cents made the model read $45.79 as
+ * "$4579.00" — a 100× lie in every figure it quoted back. The conversion
+ * happens here, once, at the wire boundary, exactly like the snapshot payload's
+ * dollars→cents conversion happens once on the way in.
+ */
+const toDollars = (cents: number): number => Math.round(cents) / 100;
 const buildContext = (): ChatContext => {
-  const { accounts, transactions } = useFinanceStore.getState();
+  const { accounts, transactions, bills, upcoming } = useFinanceStore.getState();
   return {
     categories: CATEGORIES.map((category) => category.value),
     accounts: accounts.map((account) => account.name),
     recent: transactions.slice(0, 20).map((transaction) => ({
       title: transaction.description,
       ...(transaction.merchant !== null ? { merchant: transaction.merchant } : {}),
-      amount: transaction.amountCents,
+      amount: toDollars(transaction.amountCents),
       category: transaction.category,
+    })),
+    bills: bills.slice(0, CONTEXT_BILLS_CAP).map((bill) => ({
+      vendor: bill.vendor,
+      amount: toDollars(bill.amountCents),
+      frequency: bill.frequency,
+      nonNegotiable: bill.nonNegotiable,
+      endDate: bill.endDate,
+      installmentsRemaining: bill.installmentsRemaining,
+      method: bill.method,
+    })),
+    upcoming: upcoming.slice(0, CONTEXT_UPCOMING_CAP).map((payment) => ({
+      name: payment.name,
+      dueDate: payment.dueDate,
+      amount: toDollars(payment.amountCents),
     })),
   };
 };

@@ -1,6 +1,7 @@
 import type {
   Account,
   AppNotification,
+  BillDigest,
   FinancialSnapshot,
   Paycheck,
   SavingsGoal,
@@ -29,6 +30,8 @@ export interface MockDataset {
   accounts: Account[];
   transactions: Transaction[];
   upcoming: UpcomingPayment[];
+  /** The Bills register digest — recurring definitions, not projected occurrences. */
+  bills: BillDigest[];
   goals: SavingsGoal[];
   paycheck: Paycheck | null;
   notifications: AppNotification[];
@@ -295,6 +298,11 @@ export const buildBaseDataset = (now: number): MockDataset => {
     },
   ];
 
+  const bills: BillDigest[] = [
+    { id: 'bill_electric', vendor: 'City Utilities', amountCents: 8_740, frequency: 'monthly', nonNegotiable: false, endDate: null, installmentsRemaining: null, method: null },
+    { id: 'bill_rent', vendor: 'Riverside Apartments', amountCents: 145_000, frequency: 'monthly', nonNegotiable: true, endDate: null, installmentsRemaining: null, method: null },
+  ];
+
   const goals: SavingsGoal[] = [
     {
       id: 'goal_emergency',
@@ -381,6 +389,7 @@ export const buildBaseDataset = (now: number): MockDataset => {
     accounts,
     transactions,
     upcoming,
+    bills,
     goals,
     paycheck,
     notifications: [],

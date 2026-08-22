@@ -3,7 +3,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { AppError } from '@/errors';
 import { fireEvent, renderWithProviders, waitFor } from '@/test/render';
 
-import { setAssumedMonthlySpend } from '@/data/accountsWrite';
+import { createBill, setAssumedMonthlySpend } from '@/data/accountsWrite';
 import { sendChatTurn } from '@/data/chat';
 import { applyMerchantRule, undoDecision } from '@/data/decisions';
 
@@ -15,6 +15,9 @@ import { ChatSheet } from '../ChatSheet';
  * request shape are `chat.test.ts`'s job, not this one's.
  */
 jest.mock('@/data/chat', () => ({
+  // `resolveBillAnchor` is real pure logic the bill card itself calls to
+  // decide whether to render Apply — only the network call is mocked.
+  ...jest.requireActual('@/data/chat'),
   sendChatTurn: jest.fn(),
 }));
 
@@ -25,6 +28,7 @@ jest.mock('@/data/decisions', () => ({
 
 jest.mock('@/data/accountsWrite', () => ({
   setAssumedMonthlySpend: jest.fn(),
+  createBill: jest.fn(),
 }));
 
 jest.mock('expo-image-picker', () => ({
@@ -35,6 +39,7 @@ const mockSend = sendChatTurn as jest.Mock;
 const mockApply = applyMerchantRule as jest.Mock;
 const mockUndo = undoDecision as jest.Mock;
 const mockSetAssumedMonthlySpend = setAssumedMonthlySpend as jest.Mock;
+const mockCreateBill = createBill as jest.Mock;
 const mockPick = ImagePicker.launchImageLibraryAsync as jest.Mock;
 
 /** A base64 string that decodes to `bytes` bytes, no padding. */
@@ -255,6 +260,131 @@ describe('ChatSheet', () => {
     expect(getByText('assume I spend 9000 a month')).toBeTruthy();
     expect(getByText('You asked to plan around $9,000 a month.')).toBeTruthy();
     expect(queryByTestId('chat-spend-apply')).toBeNull();
+  });
+
+  const installmentBill = {
+    action: 'record_bill' as const,
+    vendor: 'Apple Card',
+    amount: 45.79,
+    frequency: 'monthly' as const,
+    dueDay: 15,
+    accountName: 'Apple Card',
+    installmentsRemaining: 13,
+    nonNegotiable: true,
+    reason: 'You said to record the Apple Card installment.',
+  };
+
+  it('a record_bill action renders a proposal card with vendor, amount, cadence, end and account', async () => {
+    mockSend.mockResolvedValue(installmentBill);
+    const { getByTestId, getByText } = await renderSheet();
+
+    await fireEvent.changeText(getByTestId('chat-input'), 'record my Apple Card installment');
+    await fireEvent.press(getByTestId('chat-send'));
+
+    await waitFor(() =>
+      expect(getByText('Record Apple Card — $45.79 monthly (day 15)')).toBeTruthy(),
+    );
+    expect(getByText('Apple Card · 13 payments left')).toBeTruthy();
+    expect(getByText('You said to record the Apple Card installment.')).toBeTruthy();
+    expect(getByTestId('chat-bill-apply')).toBeTruthy();
+    expect(getByTestId('chat-bill-dismiss')).toBeTruthy();
+  });
+
+  it('Apply calls createBill with the resolved shape and swaps to a saved state', async () => {
+    mockSend.mockResolvedValue(installmentBill);
+    mockCreateBill.mockResolvedValue('bill_1');
+    const { getByTestId, getByText, queryByTestId } = await renderSheet();
+
+    await fireEvent.changeText(getByTestId('chat-input'), 'record my Apple Card installment');
+    await fireEvent.press(getByTestId('chat-send'));
+    await waitFor(() => expect(getByTestId('chat-bill-apply')).toBeTruthy());
+
+    await fireEvent.press(getByTestId('chat-bill-apply'));
+
+    await waitFor(() => expect(mockCreateBill).toHaveBeenCalledTimes(1));
+    expect(mockCreateBill).toHaveBeenCalledWith({
+      vendor: 'Apple Card',
+      amountCents: 4579,
+      frequency: 'monthly',
+      accountName: 'Apple Card',
+      autopayDay: 15,
+      anchorDate: undefined,
+      endDate: undefined,
+      installmentsRemaining: 13,
+      nonNegotiable: true,
+    });
+
+    await waitFor(() =>
+      expect(
+        getByText(
+          "Saved — Apple Card now shows in Upcoming and Bills, $45.79 monthly. Edit it from the web app's Bills tab.",
+        ),
+      ).toBeTruthy(),
+    );
+    expect(queryByTestId('chat-bill-apply')).toBeNull();
+    // No Undo verb exists server-side for bills — this card never offers one.
+    expect(queryByTestId('chat-bill-undo')).toBeNull();
+  });
+
+  it('blocks Apply for a non-monthly bill with no next due date, mirroring the server card', async () => {
+    mockSend.mockResolvedValue({
+      action: 'record_bill',
+      vendor: 'Home Insurance',
+      amount: 620,
+      frequency: 'annual',
+      reason: 'You said to record your home insurance.',
+    });
+    const { getByTestId, getByText, queryByTestId } = await renderSheet();
+
+    await fireEvent.changeText(getByTestId('chat-input'), 'record my home insurance');
+    await fireEvent.press(getByTestId('chat-send'));
+
+    await waitFor(() =>
+      expect(
+        getByText(
+          "I don't have a next due date for a annual bill, so it can't show a schedule yet — tell me when the next payment is due.",
+        ),
+      ).toBeTruthy(),
+    );
+    expect(queryByTestId('chat-bill-apply')).toBeNull();
+    expect(getByTestId('chat-bill-dismiss')).toBeTruthy();
+    expect(mockCreateBill).not.toHaveBeenCalled();
+  });
+
+  it('Dismiss on a bill proposal keeps the chat open and does not write', async () => {
+    mockSend.mockResolvedValue(installmentBill);
+    const onClose = jest.fn();
+    const { getByTestId, getByText, queryByTestId } = await renderSheet(onClose);
+
+    await fireEvent.changeText(getByTestId('chat-input'), 'record my Apple Card installment');
+    await fireEvent.press(getByTestId('chat-send'));
+    await waitFor(() => expect(getByTestId('chat-bill-dismiss')).toBeTruthy());
+
+    await fireEvent.press(getByTestId('chat-bill-dismiss'));
+
+    expect(mockCreateBill).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(getByText('record my Apple Card installment')).toBeTruthy();
+    expect(getByText('You said to record the Apple Card installment.')).toBeTruthy();
+    expect(queryByTestId('chat-bill-apply')).toBeNull();
+  });
+
+  it('shows the AppError userMessage on a bill write failure and allows retrying Apply', async () => {
+    mockSend.mockResolvedValue(installmentBill);
+    mockCreateBill.mockRejectedValueOnce(
+      new AppError({ category: 'data', userMessage: "Cashflow couldn't save that bill." }),
+    );
+    const { getByTestId, getByText } = await renderSheet();
+
+    await fireEvent.changeText(getByTestId('chat-input'), 'record my Apple Card installment');
+    await fireEvent.press(getByTestId('chat-send'));
+    await waitFor(() => expect(getByTestId('chat-bill-apply')).toBeTruthy());
+
+    await fireEvent.press(getByTestId('chat-bill-apply'));
+
+    await waitFor(() => expect(getByText("Cashflow couldn't save that bill.")).toBeTruthy());
+    // The card stays actionable — a busy guard, not a dead end.
+    expect(getByTestId('chat-bill-apply')).toBeTruthy();
   });
 
   it('shows the AppError userMessage inline on a send failure, with a retry', async () => {

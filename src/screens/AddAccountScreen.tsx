@@ -183,7 +183,7 @@ export const AddAccountScreen = () => {
   };
 
   return (
-    <AppScreen testID="screen-add-account">
+    <AppScreen fabSource="accounts" testID="screen-add-account">
       <View style={{ gap: theme.spacing.xl }}>
         {plaidAvailable ? (
           <View>

@@ -72,12 +72,13 @@ export const refreshFinancialData = async (
     });
   }
 
-  const [snapshotResult, accountsResult, activityResult, upcomingResult, goalsResult] =
+  const [snapshotResult, accountsResult, activityResult, upcomingResult, billsResult, goalsResult] =
     await Promise.allSettled([
       repositories.snapshot.current(),
       repositories.accounts.list(),
       repositories.activity.list({ limit: 50 }),
       repositories.plan.upcoming(),
+      repositories.plan.bills(),
       repositories.plan.goals(),
     ]);
 
@@ -107,6 +108,7 @@ export const refreshFinancialData = async (
   const accounts = collect('accounts', accountsResult);
   const transactions = collect('activity', activityResult);
   const upcoming = collect('plan', upcomingResult);
+  const bills = collect('plan', billsResult);
   const goals = collect('plan', goalsResult);
 
   // A failed bank sync is a PARTIAL refresh, not a clean one. The derivation
@@ -164,6 +166,7 @@ export const refreshFinancialData = async (
     ...(accounts ? { accounts } : {}),
     ...(transactions ? { transactions } : {}),
     ...(upcoming ? { upcoming } : {}),
+    ...(bills ? { bills } : {}),
     ...(goals ? { goals } : {}),
     ...(snapshotBundle ? { paycheck: snapshotBundle.snapshot.nextPaycheck } : {}),
     changes,

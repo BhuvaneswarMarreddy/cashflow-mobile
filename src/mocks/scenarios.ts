@@ -169,6 +169,7 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       accounts: [],
       transactions: [],
       upcoming: [],
+      bills: [],
       goals: [],
       paycheck: null,
       notifications: [],

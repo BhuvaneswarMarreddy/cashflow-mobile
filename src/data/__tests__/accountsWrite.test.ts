@@ -2,8 +2,18 @@ import { doc, setDoc } from '@firebase/firestore';
 
 import { triggerRefresh } from '@/hooks/useRefresh';
 import { firebaseAuth } from '@/services/firebase';
+import { useFinanceStore } from '@/store/financeStore';
+import type { Account } from '@/types';
 
-import { accountDocument, setAssumedMonthlySpend, type NewAccount } from '../accountsWrite';
+import {
+  accountDocument,
+  billDocument,
+  createBill,
+  resolvePaymentMethodId,
+  setAssumedMonthlySpend,
+  type NewAccount,
+  type NewBill,
+} from '../accountsWrite';
 
 /**
  * `setAssumedMonthlySpend` mocks the wire, not Firestore — same posture as
@@ -48,6 +58,19 @@ const base: NewAccount = {
   provider: 'apple',
   openingBalanceCents: null,
 };
+
+const acct = (partial: Partial<Account> & { id: string; name: string }): Account => ({
+  institution: 'Meridian Bank',
+  kind: 'checking',
+  mask: '1234',
+  balanceCents: 0,
+  availableCents: 0,
+  creditLimitCents: null,
+  currency: 'USD',
+  lastSyncedAt: null,
+  status: 'ok',
+  ...partial,
+});
 
 describe('accountDocument', () => {
   it('writes NO openingDate when the balance is left blank, so all history counts', () => {
@@ -152,6 +175,158 @@ describe('setAssumedMonthlySpend', () => {
 
     await expect(setAssumedMonthlySpend(9000)).rejects.toMatchObject({
       code: 'ASSUMED_SPEND_WRITE_FAILED',
+      retryable: true,
+    });
+    expect(mockTriggerRefresh).not.toHaveBeenCalled();
+  });
+});
+
+describe('resolvePaymentMethodId', () => {
+  const accounts = [acct({ id: 'acc_apple', name: 'Apple Card' }), acct({ id: 'acc_checking', name: 'Everyday Checking' })];
+
+  it('resolves an exact, case-insensitive match', () => {
+    expect(resolvePaymentMethodId('apple card', accounts)).toBe('acc_apple');
+  });
+
+  it('resolves a unique substring match', () => {
+    expect(resolvePaymentMethodId('Apple', accounts)).toBe('acc_apple');
+  });
+
+  it('falls back to manual on an ambiguous substring match', () => {
+    const ambiguous = [acct({ id: 'a', name: 'Apple Card' }), acct({ id: 'b', name: 'Apple Cash' })];
+    expect(resolvePaymentMethodId('Apple', ambiguous)).toBe('manual');
+  });
+
+  it('falls back to manual when nothing matches', () => {
+    expect(resolvePaymentMethodId('Discover', accounts)).toBe('manual');
+  });
+
+  it('falls back to manual when no accountName is given', () => {
+    expect(resolvePaymentMethodId(undefined, accounts)).toBe('manual');
+  });
+});
+
+describe('billDocument', () => {
+  const base: NewBill = { vendor: '  Apple Card  ', amountCents: 4_579, frequency: 'monthly' };
+
+  it('satisfies the fields firestore.rules requires on create', () => {
+    const doc = billDocument(base, 'acc_apple');
+    for (const key of ['vendor', 'amount', 'frequency', 'paymentMethodId', 'migrationStatus', 'lifecycleStatus']) {
+      expect(doc[key]).toBeDefined();
+    }
+    expect(doc.vendor).toBe('Apple Card');
+    expect(doc.amount).toBe(45.79);
+    expect(doc.frequency).toBe('monthly');
+    expect(doc.paymentMethodId).toBe('acc_apple');
+  });
+
+  it('defaults migrationStatus/lifecycleStatus to the web record_bill card values', () => {
+    const doc = billDocument(base, 'manual');
+    expect(doc.migrationStatus).toBe('to-review');
+    expect(doc.lifecycleStatus).toBe('active');
+  });
+
+  it('omits optional fields rather than writing undefined, which Firestore rejects', () => {
+    const doc = billDocument(base, 'manual');
+    for (const key of ['autopayDay', 'anchorDate', 'endDate', 'installmentsRemaining', 'nonNegotiable']) {
+      expect(key in doc).toBe(false);
+    }
+  });
+
+  it('includes optional fields when present — including a falsy nonNegotiable', () => {
+    const doc = billDocument(
+      {
+        ...base,
+        autopayDay: 15,
+        anchorDate: '2026-09-15',
+        endDate: '2027-01-01',
+        installmentsRemaining: 13,
+        nonNegotiable: false,
+      },
+      'manual',
+    );
+    expect(doc.autopayDay).toBe(15);
+    expect(doc.anchorDate).toBe('2026-09-15');
+    expect(doc.endDate).toBe('2027-01-01');
+    expect(doc.installmentsRemaining).toBe(13);
+    expect(doc.nonNegotiable).toBe(false);
+  });
+});
+
+describe('createBill', () => {
+  const input: NewBill = {
+    vendor: 'Apple Card',
+    amountCents: 4_579,
+    frequency: 'monthly',
+    autopayDay: 15,
+    installmentsRemaining: 13,
+    nonNegotiable: true,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockSetDoc.mockResolvedValue(undefined);
+    mockFirebaseAuth.mockReturnValue({ currentUser: { uid: 'u1' } });
+    useFinanceStore.setState({ accounts: [] });
+  });
+
+  it('writes users/{uid}/bills with the resolved shape and triggers a refresh', async () => {
+    await createBill(input);
+
+    expect(mockSetDoc).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        vendor: 'Apple Card',
+        amount: 45.79,
+        frequency: 'monthly',
+        paymentMethodId: 'manual',
+        migrationStatus: 'to-review',
+        lifecycleStatus: 'active',
+        autopayDay: 15,
+        installmentsRemaining: 13,
+        nonNegotiable: true,
+        createdAt: 'SERVER_TIME',
+        updatedAt: 'SERVER_TIME',
+      }),
+    );
+    expect(mockTriggerRefresh).toHaveBeenCalledWith('tap');
+  });
+
+  it('resolves paymentMethodId from accountName against the store accounts', async () => {
+    useFinanceStore.setState({ accounts: [acct({ id: 'acc_card', name: 'Apple Card' })] });
+
+    await createBill({ ...input, accountName: 'apple card' });
+
+    expect(mockSetDoc).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ paymentMethodId: 'acc_card' }),
+    );
+  });
+
+  it('falls back to manual when the accountName does not resolve', async () => {
+    useFinanceStore.setState({ accounts: [acct({ id: 'acc_other', name: 'Checking' })] });
+
+    await createBill({ ...input, accountName: 'Nonexistent Card' });
+
+    expect(mockSetDoc).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ paymentMethodId: 'manual' }),
+    );
+  });
+
+  it('throws NOT_SIGNED_IN and never writes or refreshes when there is no user', async () => {
+    mockFirebaseAuth.mockReturnValue({ currentUser: null });
+
+    await expect(createBill(input)).rejects.toMatchObject({ code: 'NOT_SIGNED_IN' });
+    expect(mockSetDoc).not.toHaveBeenCalled();
+    expect(mockTriggerRefresh).not.toHaveBeenCalled();
+  });
+
+  it('wraps a write failure into a retryable AppError and does not refresh', async () => {
+    mockSetDoc.mockRejectedValue(new Error('boom'));
+
+    await expect(createBill(input)).rejects.toMatchObject({
+      code: 'BILL_CREATE_FAILED',
       retryable: true,
     });
     expect(mockTriggerRefresh).not.toHaveBeenCalled();

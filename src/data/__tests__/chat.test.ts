@@ -5,7 +5,7 @@ import { useFinanceStore } from '@/store/financeStore';
 import type { Account, Transaction } from '@/types';
 
 import { CATEGORIES } from '../../features/activity/categories';
-import { parseChatAction, sendChatTurn } from '../chat';
+import { parseChatAction, resolveBillAnchor, sendChatTurn } from '../chat';
 
 /**
  * Mocks the wire, not the model — same posture as `decisions.test.ts`. The
@@ -52,7 +52,7 @@ const txn = (partial: Partial<Transaction> & { id: string }): Transaction => ({
 beforeEach(() => {
   jest.clearAllMocks();
   mockIsFirebaseConfigured.mockReturnValue(true);
-  useFinanceStore.setState({ accounts: [], transactions: [] });
+  useFinanceStore.setState({ accounts: [], transactions: [], bills: [], upcoming: [] });
 });
 
 describe('parseChatAction', () => {
@@ -195,6 +195,43 @@ describe('parseChatAction', () => {
    * The parser already handles every one of these correctly — these pin that
    * behaviour so a future change can't regress it silently.
    */
+  describe('record_bill server parity', () => {
+    const base = {
+      action: 'record_bill',
+      vendor: 'Apple Card',
+      amount: 45.79,
+      frequency: 'monthly',
+      reason: 'r',
+    };
+
+    it('rejects a vendor longer than the 200-char rules bound', () => {
+      expect(parseChatAction({ ...base, vendor: 'A'.repeat(201) })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+      expect(parseChatAction({ ...base, vendor: 'A'.repeat(200) })).toMatchObject({
+        action: 'record_bill',
+      });
+    });
+
+    it('rejects a nextDueDate outside the server sanity window', () => {
+      const far = new Date(Date.now() + 500 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const longPast = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const soon = new Date(Date.now() + 20 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      expect(parseChatAction({ ...base, nextDueDate: far })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+      expect(parseChatAction({ ...base, nextDueDate: longPast })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+      expect(parseChatAction({ ...base, nextDueDate: soon })).toMatchObject({
+        action: 'record_bill',
+      });
+    });
+  });
+
   describe('adversarial payloads (regression pins, not new behaviour)', () => {
     it('rejects a numeric action', () => {
       expect(parseChatAction({ action: 1, explanation: 'nope' })).toEqual({
@@ -352,6 +389,218 @@ describe('parseChatAction', () => {
       });
     });
   });
+
+  describe('record_bill', () => {
+    const valid = {
+      action: 'record_bill',
+      vendor: 'Apple Card',
+      amount: 45.79,
+      frequency: 'monthly',
+      reason: "You said to record the Apple Card installment.",
+    };
+
+    it('accepts a minimal valid record_bill action', () => {
+      expect(parseChatAction(valid)).toEqual(valid);
+    });
+
+    it('accepts every optional field together', () => {
+      const raw = {
+        ...valid,
+        dueDay: 15,
+        nextDueDate: '2026-09-15',
+        accountName: 'Apple Card',
+        installmentsRemaining: 13,
+        nonNegotiable: true,
+      };
+      expect(parseChatAction(raw)).toEqual(raw);
+    });
+
+    it('accepts endDate instead of installmentsRemaining', () => {
+      const raw = { ...valid, endDate: '2027-01-01' };
+      expect(parseChatAction(raw)).toEqual(raw);
+    });
+
+    it('rejects both endDate and installmentsRemaining present together', () => {
+      const raw = { ...valid, endDate: '2027-01-01', installmentsRemaining: 5 };
+      expect(parseChatAction(raw)).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+    });
+
+    it('rejects a bad frequency', () => {
+      expect(parseChatAction({ ...valid, frequency: 'daily' })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+    });
+
+    it('rejects zero, negative, non-finite and sub-cent amounts', () => {
+      for (const amount of [0, -1, Infinity, NaN, 0.001]) {
+        expect(parseChatAction({ ...valid, amount })).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+      }
+    });
+
+    it('accepts the upper bound of 100,000 and rejects one cent over it', () => {
+      expect(parseChatAction({ ...valid, amount: 100_000 })).toEqual({ ...valid, amount: 100_000 });
+      expect(parseChatAction({ ...valid, amount: 100_000.01 })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+    });
+
+    it('rejects a non-numeric amount', () => {
+      expect(parseChatAction({ ...valid, amount: '45.79' })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+    });
+
+    it('rejects dueDay out of 1-31 or non-integer', () => {
+      for (const dueDay of [0, 32, 1.5]) {
+        expect(parseChatAction({ ...valid, dueDay })).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+      }
+    });
+
+    it('accepts dueDay at the 1 and 31 bounds', () => {
+      expect(parseChatAction({ ...valid, dueDay: 1 })).toEqual({ ...valid, dueDay: 1 });
+      expect(parseChatAction({ ...valid, dueDay: 31 })).toEqual({ ...valid, dueDay: 31 });
+    });
+
+    it('rejects installmentsRemaining out of 1-480 or non-integer', () => {
+      for (const installmentsRemaining of [0, 481, 2.5]) {
+        expect(parseChatAction({ ...valid, installmentsRemaining })).toEqual({
+          action: 'answer',
+          explanation: "I can't do that from the phone yet.",
+        });
+      }
+    });
+
+    it('rejects a malformed nextDueDate or endDate', () => {
+      expect(parseChatAction({ ...valid, nextDueDate: '09/15/2026' })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+      expect(parseChatAction({ ...valid, endDate: 'not-a-date' })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+      // Calendar-invalid: fails Date.parse despite matching the regex shape.
+      expect(parseChatAction({ ...valid, nextDueDate: '2026-13-40' })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+    });
+
+    it('rejects a missing or empty vendor, and a missing or empty reason', () => {
+      const { vendor: _vendor, ...noVendor } = valid;
+      expect(parseChatAction(noVendor)).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+      expect(parseChatAction({ ...valid, vendor: '   ' })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+      expect(parseChatAction({ ...valid, reason: '' })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+    });
+
+    it('rejects an accountName present but empty/whitespace', () => {
+      expect(parseChatAction({ ...valid, accountName: '   ' })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+    });
+
+    it('rejects a non-boolean nonNegotiable', () => {
+      expect(parseChatAction({ ...valid, nonNegotiable: 'yes' })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+    });
+
+    it('rejects unknown top-level keys', () => {
+      expect(parseChatAction({ ...valid, extra: 'nope' })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+    });
+
+    it('rejects a __proto__ key alongside an otherwise valid payload', () => {
+      const raw = JSON.parse(
+        `{"action":"record_bill","vendor":"Apple Card","amount":45.79,"frequency":"monthly",` +
+          `"reason":"r","__proto__":{"polluted":true}}`,
+      ) as unknown;
+      expect(parseChatAction(raw)).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+      expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    });
+
+    it('rejects a constructor/prototype key nested under the payload', () => {
+      const raw = JSON.parse(
+        `{"action":"record_bill","vendor":"Apple Card","amount":45.79,"frequency":"monthly",` +
+          `"reason":"r","constructor":{"prototype":{"polluted":true}}}`,
+      ) as unknown;
+      expect(parseChatAction(raw)).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+    });
+  });
+});
+
+describe('resolveBillAnchor', () => {
+  it('weekly/biweekly resolve an anchorDate from nextDueDate, with no autopayDay', () => {
+    expect(resolveBillAnchor({ frequency: 'weekly', nextDueDate: '2026-08-28' })).toEqual({
+      anchorDate: '2026-08-28',
+    });
+    expect(resolveBillAnchor({ frequency: 'biweekly', nextDueDate: '2026-08-28' })).toEqual({
+      anchorDate: '2026-08-28',
+    });
+  });
+
+  it('weekly/biweekly with no nextDueDate cannot be anchored', () => {
+    expect(resolveBillAnchor({ frequency: 'weekly' })).toBeNull();
+    expect(resolveBillAnchor({ frequency: 'biweekly', dueDay: 15 })).toBeNull();
+  });
+
+  it('monthly never blocks — no autopayDay at all is "varies"', () => {
+    expect(resolveBillAnchor({ frequency: 'monthly' })).toEqual({ autopayDay: undefined });
+    expect(resolveBillAnchor({ frequency: 'monthly', dueDay: 15 })).toEqual({ autopayDay: 15 });
+  });
+
+  it('monthly derives autopayDay from nextDueDate when dueDay is absent', () => {
+    expect(resolveBillAnchor({ frequency: 'monthly', nextDueDate: '2026-09-15' })).toEqual({
+      autopayDay: 15,
+    });
+  });
+
+  it('dueDay wins over a nextDueDate-derived day when both are present', () => {
+    expect(resolveBillAnchor({ frequency: 'monthly', dueDay: 1, nextDueDate: '2026-09-15' })).toEqual({
+      autopayDay: 1,
+    });
+  });
+
+  it('quarterly/semiannual/annual need nextDueDate as the only anchorDate source', () => {
+    for (const frequency of ['quarterly', 'semiannual', 'annual'] as const) {
+      expect(resolveBillAnchor({ frequency, dueDay: 15 })).toBeNull();
+      expect(resolveBillAnchor({ frequency, nextDueDate: '2026-09-15' })).toEqual({
+        autopayDay: 15,
+        anchorDate: '2026-09-15',
+      });
+    }
+  });
 });
 
 describe('sendChatTurn', () => {
@@ -382,9 +631,13 @@ describe('sendChatTurn', () => {
         categories: CATEGORIES.map((c) => c.value),
         accounts: ['Everyday Checking', 'Sapphire Card'],
         recent: [
-          { title: 'STARBUCKS', merchant: 'Starbucks', amount: -650, category: 'food' },
-          { title: 'POS DEBIT', amount: -1200, category: 'shopping' },
+          // Dollars on the wire: the server prints context amounts with
+          // toFixed(2), so cents here read back as 100x the real figure.
+          { title: 'STARBUCKS', merchant: 'Starbucks', amount: -6.5, category: 'food' },
+          { title: 'POS DEBIT', amount: -12, category: 'shopping' },
         ],
+        bills: [],
+        upcoming: [],
       },
     });
     expect(result).toEqual({ action: 'answer', explanation: 'hi' });
@@ -406,6 +659,88 @@ describe('sendChatTurn', () => {
     expect(sent.context.recent).toHaveLength(20);
     expect(sent.context.recent[0].title).toBe('Txn 0');
     expect(sent.context.recent[19].title).toBe('Txn 19');
+  });
+
+  it('sends bills and upcoming so the model can answer recurring-payment questions', async () => {
+    useFinanceStore.setState({
+      accounts: [],
+      transactions: [],
+      bills: [
+        { id: 'b1', vendor: 'City Utilities', amountCents: 8_740, frequency: 'monthly', nonNegotiable: false, endDate: null, installmentsRemaining: null, method: null },
+      ],
+      upcoming: [
+        {
+          id: 'u1',
+          name: 'City Utilities',
+          dueDate: '2026-08-25',
+          amountCents: 8_740,
+          accountId: 'acc_checking',
+          kind: 'bill',
+          autopay: true,
+        },
+      ],
+    });
+    const callable = jest
+      .fn()
+      .mockResolvedValue({ data: { success: true, result: { action: 'answer', explanation: 'ok' } } });
+    mockHttpsCallable.mockReturnValue(callable);
+
+    await sendChatTurn({ message: 'what are my recurring payments?', history: [] });
+
+    const sent = callable.mock.calls[0][0];
+    // Dollars, not cents: the server prints these with toFixed(2).
+    expect(sent.context.bills).toEqual([
+      {
+        vendor: 'City Utilities',
+        amount: 87.4,
+        frequency: 'monthly',
+        nonNegotiable: false,
+        endDate: null,
+        installmentsRemaining: null,
+        method: null,
+      },
+    ]);
+    expect(sent.context.upcoming).toEqual([
+      { name: 'City Utilities', dueDate: '2026-08-25', amount: 87.4 },
+    ]);
+  });
+
+  it('caps bills and upcoming at 30, taking the front of each array', async () => {
+    useFinanceStore.setState({
+      accounts: [],
+      transactions: [],
+      bills: Array.from({ length: 35 }, (_, i) => ({
+        id: `b${i}`,
+        vendor: `Vendor ${i}`,
+        amountCents: 100,
+        frequency: 'monthly' as const,
+        nonNegotiable: false,
+        endDate: null,
+        installmentsRemaining: null,
+        method: null,
+      })),
+      upcoming: Array.from({ length: 35 }, (_, i) => ({
+        id: `u${i}`,
+        name: `Payment ${i}`,
+        dueDate: '2026-08-25',
+        amountCents: 100,
+        accountId: null,
+        kind: 'bill' as const,
+        autopay: false,
+      })),
+    });
+    const callable = jest
+      .fn()
+      .mockResolvedValue({ data: { success: true, result: { action: 'answer', explanation: 'ok' } } });
+    mockHttpsCallable.mockReturnValue(callable);
+
+    await sendChatTurn({ message: 'summary', history: [] });
+
+    const sent = callable.mock.calls[0][0];
+    expect(sent.context.bills).toHaveLength(30);
+    expect(sent.context.upcoming).toHaveLength(30);
+    expect(sent.context.bills[0].vendor).toBe('Vendor 0');
+    expect(sent.context.upcoming[0].name).toBe('Payment 0');
   });
 
   it('passes image fields through when an image is attached', async () => {

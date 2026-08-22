@@ -127,7 +127,7 @@ export const ReviewScreen = () => {
 
   if (!loaded && !queue) {
     return (
-      <AppScreen testID="screen-review">
+      <AppScreen fabSource="more" testID="screen-review">
         <View style={{ gap: theme.spacing.lg }}>
           <SkeletonCard lines={2} />
           <SkeletonCard lines={5} />
@@ -138,7 +138,7 @@ export const ReviewScreen = () => {
 
   if (error && !queue) {
     return (
-      <AppScreen testID="screen-review">
+      <AppScreen fabSource="more" testID="screen-review">
         <ErrorState error={error} onRetry={load} />
       </AppScreen>
     );
@@ -146,7 +146,7 @@ export const ReviewScreen = () => {
 
   if (queue && !item) {
     return (
-      <AppScreen testID="screen-review">
+      <AppScreen fabSource="more" testID="screen-review">
         <EmptyState
           kind="no-transactions"
           icon="check-circle"
@@ -163,7 +163,7 @@ export const ReviewScreen = () => {
   }
 
   return (
-    <AppScreen testID="screen-review">
+    <AppScreen fabSource="more" testID="screen-review">
       <View style={{ gap: theme.spacing.xl }}>
         <View style={{ gap: theme.spacing.sm }}>
           <SectionHeader

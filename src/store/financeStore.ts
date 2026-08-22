@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import type { ErrorCategory } from '@/errors';
 import type {
   Account,
+  BillDigest,
   FinancialSnapshot,
   Paycheck,
   SavingsGoal,
@@ -38,6 +39,7 @@ interface FinanceState {
   accounts: Account[];
   transactions: Transaction[];
   upcoming: UpcomingPayment[];
+  bills: BillDigest[];
   goals: SavingsGoal[];
   paycheck: Paycheck | null;
   changes: SnapshotChange[];
@@ -57,6 +59,7 @@ interface FinanceState {
     accounts?: Account[];
     transactions?: Transaction[];
     upcoming?: UpcomingPayment[];
+    bills?: BillDigest[];
     goals?: SavingsGoal[];
     paycheck?: Paycheck | null;
     changes?: SnapshotChange[];
@@ -74,6 +77,7 @@ const EMPTY = {
   accounts: [] as Account[],
   transactions: [] as Transaction[],
   upcoming: [] as UpcomingPayment[],
+  bills: [] as BillDigest[],
   goals: [] as SavingsGoal[],
   paycheck: null,
   changes: [] as SnapshotChange[],
@@ -102,6 +106,7 @@ export const useFinanceStore = create<FinanceState>()((set) => ({
       accounts: result.accounts ?? state.accounts,
       transactions: result.transactions ?? state.transactions,
       upcoming: result.upcoming ?? state.upcoming,
+      bills: result.bills ?? state.bills,
       goals: result.goals ?? state.goals,
       paycheck: result.paycheck !== undefined ? result.paycheck : state.paycheck,
       changes: result.changes ?? state.changes,

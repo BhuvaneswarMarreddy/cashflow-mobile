@@ -2,6 +2,8 @@ export type {
   Account,
   AccountKind,
   AccountStatus,
+  BillDigest,
+  BillFrequency,
   ChangeSeverity,
   Currency,
   FinancialSnapshot,

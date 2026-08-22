@@ -50,6 +50,7 @@ const basePayload = (assumedMonthlySpend: number | null) => ({
   },
   accounts: [],
   upcoming: [],
+  bills: [],
   goals: [],
   activity: [],
 });
@@ -76,5 +77,20 @@ describe('createFirebaseRepositories snapshot.current', () => {
     const { snapshot } = await createFirebaseRepositories().snapshot.current();
 
     expect(snapshot.assumedMonthlySpendCents).toBeNull();
+  });
+});
+
+describe('createFirebaseRepositories plan.bills', () => {
+  it('carries the Bills register digest through from the payload, one call for both', async () => {
+    const bills = [
+      { id: 'bill_1', vendor: 'City Utilities', amountCents: 8_740, frequency: 'monthly' as const, nonNegotiable: false },
+    ];
+    const callable = jest.fn().mockResolvedValue({ data: { ...basePayload(null), bills } });
+    mockHttpsCallable.mockReturnValue(callable);
+
+    const result = await createFirebaseRepositories().plan.bills();
+
+    expect(result).toEqual(bills);
+    expect(callable).toHaveBeenCalledTimes(1);
   });
 });

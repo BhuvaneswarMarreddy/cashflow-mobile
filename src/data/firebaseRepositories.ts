@@ -8,6 +8,7 @@ import { useFinanceStore } from '@/store/financeStore';
 import type { Repositories, SnapshotBundle } from './types';
 import type {
   Account,
+  BillDigest,
   FinancialSnapshot,
   Paycheck,
   SavingsGoal,
@@ -51,6 +52,13 @@ interface SnapshotPayload {
   };
   accounts: Account[];
   upcoming: UpcomingPayment[];
+  /**
+   * CHAT-BILLS-001: the Bills register digest, for chat context and the
+   * (future) Upcoming feed. Arrives already in CENTS — the general payload
+   * rule (see `toCents` below); `assumedMonthlySpend` above is the one
+   * documented exception, being a raw settings passthrough, not a register.
+   */
+  bills: BillDigest[];
   goals: SavingsGoal[];
   activity: Transaction[];
 }
@@ -202,6 +210,7 @@ export const createFirebaseRepositories = (): Repositories => ({
 
   plan: {
     upcoming: async () => (await fetchSnapshot()).upcoming,
+    bills: async () => (await fetchSnapshot()).bills,
     goals: async () => (await fetchSnapshot()).goals,
     nextPaycheck: async (): Promise<Paycheck | null> =>
       (await fetchSnapshot()).snapshot.nextPaycheck,

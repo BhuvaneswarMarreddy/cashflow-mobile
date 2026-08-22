@@ -33,6 +33,7 @@ export const mockRepositories: Repositories = {
       respond('plan', (data) =>
         [...data.upcoming].sort((a, b) => a.dueDate.localeCompare(b.dueDate)),
       ),
+    bills: () => respond('plan', (data) => data.bills),
     goals: () => respond('plan', (data) => data.goals),
     nextPaycheck: () => respond('plan', (data) => data.paycheck),
   },

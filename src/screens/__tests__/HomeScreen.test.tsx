@@ -116,7 +116,7 @@ describe('HomeScreen', () => {
     expect(getByTestId('metric-runway')).not.toHaveTextContent('your assumption', { exact: false });
   });
 
-  it('marks the monthly figure as the owner\'s own assumption when one is set', async () => {
+  it("marks the monthly figure as the owner's own assumption when one is set", async () => {
     loaded();
     useFinanceStore.setState({
       snapshot: { ...data.snapshot, assumedMonthlySpendCents: 900_000 },
@@ -139,10 +139,10 @@ describe('HomeScreen', () => {
 
   it('opens the chat sheet from the "Ask Cashflow" quick action', async () => {
     loaded();
-    const { getByLabelText, getByText, getByTestId } = await renderHome();
+    const { getByLabelText, getByTestId } = await renderHome();
 
     await fireEvent.press(getByLabelText('Quick actions'));
-    await fireEvent.press(getByText('Ask Cashflow'));
+    await fireEvent.press(getByTestId('fab-action-ask-ai'));
 
     await waitFor(() => expect(getByTestId('chat-input')).toBeTruthy());
   });

@@ -40,6 +40,8 @@ describe('refreshFinancialData', () => {
     expect(state.lastRefreshedAt).not.toBeNull();
     expect(state.hasLoadedOnce).toBe(true);
     expect(state.lastError).toBeNull();
+    // CHAT-BILLS-001: the Bills register digest rides the same 'plan' fetch upcoming does.
+    expect(state.bills.length).toBeGreaterThan(0);
   });
 
   it('detects what changed against the previous snapshot', async () => {

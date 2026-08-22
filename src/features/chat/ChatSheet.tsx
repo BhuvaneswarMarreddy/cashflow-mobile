@@ -27,8 +27,21 @@ type ProposalState =
 
 type ProposalRule = Extract<ChatAction, { action: 'create_rule' }>['rule'];
 
+// Headroom under the server's 10MB request cap (see task-chat-brief.md).
+const MAX_IMAGE_BYTES = 9 * 1024 * 1024;
+
+/** Decoded byte size of a base64 string: 3 bytes per 4 chars, minus padding. */
+const decodedBase64Size = (base64: string): number => {
+  const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
+  return Math.floor((base64.length * 3) / 4) - padding;
+};
+
 type Entry =
-  | { id: string; kind: 'user'; text: string; image?: { uri: string; base64: string; mimeType: string } }
+  // No `base64` here — only `lastTurn` (below) needs the decoded bytes, for
+  // retry, and it's replaced/cleared every turn. The thumbnail only ever
+  // renders `uri`; keeping the decoded image in permanent transcript state
+  // would grow this component's memory without bound across a long chat.
+  | { id: string; kind: 'user'; text: string; image?: { uri: string; mimeType: string } }
   | { id: string; kind: 'text'; text: string }
   | { id: string; kind: 'proposal'; rule: ProposalRule; explanation: string; state: ProposalState };
 
@@ -171,11 +184,12 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
       id: createId('chat'),
       kind: 'user',
       text,
-      ...(pendingImage ? { image: pendingImage } : {}),
+      ...(pendingImage ? { image: { uri: pendingImage.uri, mimeType: pendingImage.mimeType } } : {}),
     };
     const turn: Turn = {
       message: text,
-      history: toHistory(entries),
+      // Trimmed to the last 10 turns — matches the server's own history cap.
+      history: toHistory(entries).slice(-10),
       ...(pendingImage
         ? { image: { base64: pendingImage.base64, mimeType: pendingImage.mimeType } }
         : {}),
@@ -198,14 +212,20 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         base64: true,
-        // Kept well under ~4MB base64 for a typical screenshot without a
-        // second, separate resize step.
+        // `quality` only affects a JPEG re-encode — iOS IGNORES it entirely
+        // for PNG library picks, and a screenshot IS a PNG. This option does
+        // nothing to bound a screenshot's payload; the size check below,
+        // computed from the decoded base64 length, is what actually does.
         quality: 0.5,
       });
       if (result.canceled) return;
       const asset = result.assets[0];
       if (!asset?.base64) {
         setAttachError("Cashflow couldn't read that image.");
+        return;
+      }
+      if (decodedBase64Size(asset.base64) > MAX_IMAGE_BYTES) {
+        setAttachError('That image is too large to send. Screenshots are fine; photos may be too big.');
         return;
       }
       setPendingImage({ uri: asset.uri, base64: asset.base64, mimeType: asset.mimeType ?? 'image/jpeg' });

@@ -189,6 +189,80 @@ describe('parseChatAction', () => {
       explanation: "I can't do that from the phone yet.",
     });
   });
+
+  /**
+   * Adversarial shapes a real model completion (or a hostile one) could send.
+   * The parser already handles every one of these correctly — these pin that
+   * behaviour so a future change can't regress it silently.
+   */
+  describe('adversarial payloads (regression pins, not new behaviour)', () => {
+    it('rejects a numeric action', () => {
+      expect(parseChatAction({ action: 1, explanation: 'nope' })).toEqual({
+        action: 'answer',
+        explanation: 'nope',
+      });
+    });
+
+    it('rejects a numeric match.value', () => {
+      const raw = {
+        action: 'create_rule',
+        rule: { match: { field: 'merchant', op: 'equals', value: 42 }, set: { category: 'food' } },
+        explanation: 'nope',
+      };
+      expect(parseChatAction(raw)).toEqual({ action: 'answer', explanation: 'nope' });
+    });
+
+    it('rejects a numeric set.category', () => {
+      const raw = {
+        action: 'create_rule',
+        rule: { match: { field: 'merchant', op: 'equals', value: 'Starbucks' }, set: { category: 42 } },
+        explanation: 'nope',
+      };
+      expect(parseChatAction(raw)).toEqual({ action: 'answer', explanation: 'nope' });
+    });
+
+    it('rejects rule as a string', () => {
+      const raw = { action: 'create_rule', rule: 'not an object', explanation: 'nope' };
+      expect(parseChatAction(raw)).toEqual({ action: 'answer', explanation: 'nope' });
+    });
+
+    it('rejects match as an array', () => {
+      const raw = {
+        action: 'create_rule',
+        rule: { match: [{ field: 'merchant', op: 'equals', value: 'Starbucks' }], set: { category: 'food' } },
+        explanation: 'nope',
+      };
+      expect(parseChatAction(raw)).toEqual({ action: 'answer', explanation: 'nope' });
+    });
+
+    it('rejects a whitespace-only match.value', () => {
+      const raw = {
+        action: 'create_rule',
+        rule: { match: { field: 'merchant', op: 'equals', value: '   ' }, set: { category: 'food' } },
+        explanation: 'nope',
+      };
+      expect(parseChatAction(raw)).toEqual({ action: 'answer', explanation: 'nope' });
+    });
+
+    it('falls back for a top-level array payload', () => {
+      expect(parseChatAction([{ action: 'answer', explanation: 'hi' }])).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+    });
+
+    it('rejects a set with only undefined-valued keys', () => {
+      const raw = {
+        action: 'create_rule',
+        rule: {
+          match: { field: 'merchant', op: 'equals', value: 'Starbucks' },
+          set: { category: undefined },
+        },
+        explanation: 'nope',
+      };
+      expect(parseChatAction(raw)).toEqual({ action: 'answer', explanation: 'nope' });
+    });
+  });
 });
 
 describe('sendChatTurn', () => {

@@ -1,3 +1,5 @@
+import * as ImagePicker from 'expo-image-picker';
+
 import { AppError } from '@/errors';
 import { fireEvent, renderWithProviders, waitFor } from '@/test/render';
 
@@ -20,9 +22,17 @@ jest.mock('@/data/decisions', () => ({
   undoDecision: jest.fn(),
 }));
 
+jest.mock('expo-image-picker', () => ({
+  launchImageLibraryAsync: jest.fn(),
+}));
+
 const mockSend = sendChatTurn as jest.Mock;
 const mockApply = applyMerchantRule as jest.Mock;
 const mockUndo = undoDecision as jest.Mock;
+const mockPick = ImagePicker.launchImageLibraryAsync as jest.Mock;
+
+/** A base64 string that decodes to `bytes` bytes, no padding. */
+const base64OfSize = (bytes: number): string => 'A'.repeat(Math.ceil(bytes / 3) * 4);
 
 const rule = {
   match: { field: 'merchant' as const, op: 'contains' as const, value: 'Starbucks' },
@@ -210,5 +220,57 @@ describe('ChatSheet', () => {
     await fireEvent.press(getByTestId('chat-send'));
 
     expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it('an oversized picked image is not attached — shows a notice instead', async () => {
+    mockPick.mockResolvedValue({
+      canceled: false,
+      assets: [{ uri: 'file://big.png', base64: base64OfSize(10 * 1024 * 1024), mimeType: 'image/png' }],
+    });
+    const { getByTestId, getByText, queryByTestId } = await renderSheet();
+
+    await fireEvent.press(getByTestId('chat-attach'));
+
+    await waitFor(() =>
+      expect(
+        getByText('That image is too large to send. Screenshots are fine; photos may be too big.'),
+      ).toBeTruthy(),
+    );
+    expect(queryByTestId('chat-remove-image')).toBeNull();
+    // Send stays disabled: no text typed and no image attached.
+    expect(getByTestId('chat-send').props.accessibilityState.disabled).toBe(true);
+  });
+
+  it('a normal-sized picked image attaches', async () => {
+    mockPick.mockResolvedValue({
+      canceled: false,
+      assets: [{ uri: 'file://ok.png', base64: base64OfSize(1024), mimeType: 'image/png' }],
+    });
+    const { getByTestId, queryByText } = await renderSheet();
+
+    await fireEvent.press(getByTestId('chat-attach'));
+
+    await waitFor(() => expect(getByTestId('chat-remove-image')).toBeTruthy());
+    expect(
+      queryByText('That image is too large to send. Screenshots are fine; photos may be too big.'),
+    ).toBeNull();
+  });
+
+  it('trims the history sent to the server to the last 10 turns', async () => {
+    mockSend.mockResolvedValue({ action: 'answer', explanation: 'ok' });
+    const { getByTestId } = await renderSheet();
+
+    for (let i = 0; i < 12; i++) {
+      await fireEvent.changeText(getByTestId('chat-input'), `message ${i}`);
+      await fireEvent.press(getByTestId('chat-send'));
+      await waitFor(() => expect(mockSend).toHaveBeenCalledTimes(i + 1));
+    }
+
+    const lastCall = mockSend.mock.calls[11][0];
+    expect(lastCall.history).toHaveLength(10);
+    // 11 prior turns (22 entries) trimmed to the last 10 — the oldest
+    // surviving entry is user turn 6's message, not turn 0's.
+    expect(lastCall.history[0]).toEqual({ role: 'user', content: 'message 6' });
+    expect(lastCall.history[9]).toEqual({ role: 'assistant', content: 'ok' });
   });
 });

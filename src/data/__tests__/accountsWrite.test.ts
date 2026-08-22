@@ -453,6 +453,17 @@ describe('renameCategory', () => {
     });
   });
 
+  /** Same cold-start hazard as addCategory: an empty store is "not loaded". */
+  it('refuses to write before the first snapshot has populated categories', async () => {
+    useFinanceStore.setState({ categories: [] });
+
+    await expect(renameCategory('vacations', 'Trips')).rejects.toMatchObject({
+      code: 'CATEGORIES_NOT_LOADED',
+      retryable: true,
+    });
+    expect(mockSetDoc).not.toHaveBeenCalled();
+  });
+
   it('changes only the label of the matching custom entry, preserving its icon', async () => {
     await renameCategory('vacations', 'Trips');
 

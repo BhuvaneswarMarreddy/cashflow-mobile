@@ -45,12 +45,13 @@ const basePayload = (assumedMonthlySpend: number | null) => ({
     lastBankSyncAt: null,
     includePending: false,
     nextPaycheck: null,
+    // Nested beside includePending — the server's placement for policy fields.
+    assumedMonthlySpend,
   },
   accounts: [],
   upcoming: [],
   goals: [],
   activity: [],
-  assumedMonthlySpend,
 });
 
 beforeEach(() => {

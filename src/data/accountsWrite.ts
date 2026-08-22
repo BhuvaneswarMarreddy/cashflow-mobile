@@ -428,6 +428,28 @@ const customCategoriesOf = (resolved: readonly CategoryOption[]): RawCustomCateg
       ...(category.archived ? { archived: true } : {}),
     }));
 
+/**
+ * The snapshot's category list is the ONLY source mobile has for the owner's
+ * existing custom categories — it reconstructs the raw array by removing the
+ * defaults. An empty store therefore means "not loaded yet", NOT "no customs":
+ * writing on that assumption replaces the whole array and silently deletes
+ * every category the owner made on web. Refuse instead; a refresh is seconds
+ * away and the card offers a retry.
+ */
+const requireLoadedCategories = (action: string): readonly CategoryOption[] => {
+  const loaded = useFinanceStore.getState().categories;
+  if (loaded.length === 0) {
+    throw new AppError({
+      category: 'data',
+      code: 'CATEGORIES_NOT_LOADED',
+      userMessage: 'Cashflow is still loading your categories — try that again in a moment.',
+      technicalMessage: `${action} called before the first snapshot populated categories`,
+      retryable: true,
+    });
+  }
+  return loaded;
+};
+
 const requireUid = (action: string): string => {
   const uid = firebaseAuth().currentUser?.uid;
   if (!uid) {
@@ -464,7 +486,7 @@ const throwCategoryWriteFailed = (error: unknown): never => {
 /** Adds a new custom category and returns its derived slug (`value`). */
 export const addCategory = async (label: string, icon?: string): Promise<string> => {
   const uid = requireUid('addCategory');
-  const resolved = resolveCategories(useFinanceStore.getState().categories);
+  const resolved = resolveCategories(requireLoadedCategories('addCategory'));
   const current = customCategoriesOf(resolved);
   const taken = new Set(resolved.map((category) => category.value));
   const value = slugForCategoryLabel(label, taken);
@@ -487,7 +509,7 @@ export const addCategory = async (label: string, icon?: string): Promise<string>
 /** Renames an existing CUSTOM category. `value` never changes — only `label`. */
 export const renameCategory = async (value: string, label: string): Promise<void> => {
   const uid = requireUid('renameCategory');
-  const resolved = resolveCategories(useFinanceStore.getState().categories);
+  const resolved = resolveCategories(requireLoadedCategories('renameCategory'));
   const current = customCategoriesOf(resolved);
   const next = current.map((category) =>
     category.value === value ? { ...category, label: label.trim() } : category,

@@ -349,7 +349,25 @@ describe('addCategory', () => {
     jest.clearAllMocks();
     mockSetDoc.mockResolvedValue(undefined);
     mockFirebaseAuth.mockReturnValue({ currentUser: { uid: 'u1' } });
+    // A LOADED set with no customs — what the server sends an owner who has
+    // never added one. Distinct from `[]`, which means "not loaded yet".
+    useFinanceStore.setState({ categories: CATEGORIES.map((c) => ({ ...c })) });
+  });
+
+  /**
+   * The store's category list is mobile's only copy of the owner's customs;
+   * an empty one means the snapshot has not landed yet. Writing then would
+   * replace the whole array with just the new entry and delete every category
+   * made on web — silently, under a "Saved" message.
+   */
+  it('refuses to write before the first snapshot has populated categories', async () => {
     useFinanceStore.setState({ categories: [] });
+
+    await expect(addCategory('Vacations')).rejects.toMatchObject({
+      code: 'CATEGORIES_NOT_LOADED',
+      retryable: true,
+    });
+    expect(mockSetDoc).not.toHaveBeenCalled();
   });
 
   it('merge-writes a fresh slug under settings.categories and refreshes, returning the slug', async () => {

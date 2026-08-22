@@ -17,6 +17,8 @@ export interface ThemeColors {
   surfaceAlt: string;
   /** App chrome — header and tab bar. */
   chrome: string;
+  /** Chrome tint laid over the tab bar's blur, so it reads as glass, not fog. */
+  chromeGlass: string;
   border: string;
   borderStrong: string;
 
@@ -59,6 +61,7 @@ const darkColors: ThemeColors = {
   surface: palette.ink[800],
   surfaceAlt: palette.ink[700],
   chrome: palette.ink[900],
+  chromeGlass: 'rgba(16, 16, 20, 0.78)',
   border: palette.ink.border,
   borderStrong: '#3A3A44',
 
@@ -95,6 +98,7 @@ const lightColors: ThemeColors = {
   surface: palette.paper[0],
   surfaceAlt: palette.paper[100],
   chrome: palette.paper[50],
+  chromeGlass: 'rgba(250, 247, 239, 0.82)',
   border: palette.paper.border,
   borderStrong: '#D8D0BC',
 

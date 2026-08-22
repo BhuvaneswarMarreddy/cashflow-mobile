@@ -288,9 +288,10 @@ describe('CategorizeSheet', () => {
     // Resolve the undo from A — should NOT call onClose (would close B)
     resolveUndo(undefined);
 
-    // Verify onClose was never called
-    await waitFor(() => {
-      expect(onClose).not.toHaveBeenCalled();
-    });
+    // Wait a tick to let the promise settle and onClose be called (if not guarded)
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Verify onClose was never called — guard prevented the stale undo's .then from running onClose
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

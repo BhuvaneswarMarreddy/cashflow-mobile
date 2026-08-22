@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 
@@ -71,6 +71,14 @@ export const CategorizeSheet = ({ transaction, onClose }: Props) => {
     setState(INITIAL_STATE);
   }
 
+  // Ref for detecting stale writes: when a pick or undo is in flight and the
+  // sheet switches transactions before it resolves, the late .then/.catch must
+  // not update state for a transaction that's no longer displayed. Guard: bail
+  // if the captured txnId at call time differs from txnIdRef.current.
+  const txnIdRef = useRef(transaction?.id);
+  // eslint-disable-next-line react-hooks/refs
+  txnIdRef.current = transaction?.id;
+
   const name = transaction ? (transaction.merchant ?? transaction.description) : '';
   const title = transaction ? `Always categorize ${name}` : 'Always categorize';
 
@@ -81,12 +89,17 @@ export const CategorizeSheet = ({ transaction, onClose }: Props) => {
 
     const field = transaction.merchant !== null ? 'merchant' : 'description';
     const value = transaction.merchant ?? transaction.description;
+    // Capture the txn id at call time for stale-write detection in the closures below.
+    const capturedTxnId = transaction.id;
 
     try {
       const result = await applyMerchantRule({
         match: { field, op: 'equals', value },
         set: { category: category.value },
       });
+      // Bail if the sheet switched transactions before this resolved: do not
+      // attribute this write's result (and summary counts) to the new transaction.
+      if (capturedTxnId !== txnIdRef.current) return;
       setState({
         phase: 'done',
         result,
@@ -95,6 +108,9 @@ export const CategorizeSheet = ({ transaction, onClose }: Props) => {
         undoError: null,
       });
     } catch (error) {
+      // Same guard in catch: this error belongs to capturedTxnId, not the
+      // transaction now displayed (if it switched).
+      if (capturedTxnId !== txnIdRef.current) return;
       const message = isAppError(error) ? error.userMessage : "Cashflow couldn't save that rule.";
       setState({ phase: 'pick', busy: false, error: message });
     }
@@ -103,10 +119,14 @@ export const CategorizeSheet = ({ transaction, onClose }: Props) => {
   const undo = async () => {
     if (state.phase !== 'done' || state.undoBusy) return;
     setState({ ...state, undoBusy: true, undoError: null });
+    // Capture txn id at call time for stale-write detection in the catch below.
+    const capturedTxnId = transaction?.id;
     try {
       await undoDecision(state.result.decisionId);
       onClose();
     } catch (error) {
+      // Bail if the sheet switched transactions: do not show this error in the new transaction.
+      if (capturedTxnId !== txnIdRef.current) return;
       const message = isAppError(error) ? error.userMessage : "Cashflow couldn't undo that rule.";
       setState((previous) =>
         previous.phase === 'done' ? { ...previous, undoBusy: false, undoError: message } : previous,

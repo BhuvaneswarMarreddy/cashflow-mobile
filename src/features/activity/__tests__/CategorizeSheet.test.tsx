@@ -175,4 +175,83 @@ describe('CategorizeSheet', () => {
     expect(getByTestId('category-food')).toBeTruthy();
     expect(queryByTestId('row-undo')).toBeNull();
   });
+
+  it('undo failure stays on done state, shows message, does not close, and can be retried', async () => {
+    // Setup: apply succeeds, then undo fails on first attempt, succeeds on retry
+    mockApply.mockResolvedValue({
+      decisionId: 'd_undo_fail',
+      changed: { transactionsMatched: 1, monthsAffected: ['2026-08'] },
+    });
+
+    let undoReject: any;
+    mockUndo
+      .mockImplementationOnce(() => new Promise((_, reject) => {
+        undoReject = reject;
+      })) // First undo attempt: reject with error
+      .mockResolvedValueOnce(undefined); // Second undo attempt: succeed
+
+    const onClose = jest.fn();
+    const { getByTestId, getByText } = await renderWithProviders(
+      <CategorizeSheet transaction={withMerchant} onClose={onClose} />,
+    );
+
+    // Get to done state
+    await fireEvent.press(getByTestId('category-transportation'));
+    await waitFor(() => expect(getByTestId('row-undo')).toBeTruthy());
+
+    // Try undo (will fail)
+    await fireEvent.press(getByTestId('row-undo'));
+
+    // Reject it
+    undoReject(
+      new AppError({ category: 'network', userMessage: 'Network unreachable. Try again?' }),
+    );
+
+    // Error should appear
+    await waitFor(() => expect(getByText('Network unreachable. Try again?')).toBeTruthy());
+
+    // Still on done state
+    expect(getByTestId('row-undo')).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Retry undo
+    await fireEvent.press(getByTestId('row-undo'));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it('does not show done state when transaction changes before write resolves', async () => {
+    // Deferred promise: pick on A, switch to B before resolve, then resolve.
+    // Asserts the late setState is ignored and B stays on pick (not done with A's data).
+    let resolvePick: any;
+    const pickPromise = new Promise((resolve) => {
+      resolvePick = resolve;
+    });
+    mockApply.mockReturnValue(pickPromise);
+
+    const onClose = jest.fn();
+    const { getByTestId, queryByTestId, rerender } = await renderWithProviders(
+      <CategorizeSheet transaction={withMerchant} onClose={onClose} />,
+    );
+
+    // Pick a category on transaction A
+    await fireEvent.press(getByTestId('category-transportation'));
+
+    // Switch to transaction B (null then B, as TransactionsList does)
+    rerender(<CategorizeSheet transaction={null} onClose={onClose} />);
+    rerender(<CategorizeSheet transaction={noMerchant} onClose={onClose} />);
+
+    // Resolve the deferred pick from A — should NOT update B's state
+    resolvePick({
+      decisionId: 'd_race',
+      changed: { transactionsMatched: 4, monthsAffected: ['2026-08'] },
+    });
+
+    // B should remain on pick list, not show A's done state or summary
+    await waitFor(() => {
+      // Should show transaction B's description, not A's
+      expect(queryByTestId('row-undo')).toBeNull(); // Not in done state
+    });
+    // Categories should still be visible (we're on pick)
+    expect(queryByTestId('category-shopping')).toBeTruthy();
+  });
 });

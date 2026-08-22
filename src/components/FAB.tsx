@@ -1,5 +1,5 @@
 import { BottomTabBarHeightContext } from '@react-navigation/bottom-tabs';
-import { useContext, useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import { Animated, Modal, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
@@ -67,26 +67,24 @@ const ROW = MINI_SIZE + GAP;
  * stays outside the `Modal`, in its usual spot, so its own tap target never
  * moves.
  *
- * Because the `Modal`'s coordinate space is the device screen rather than
- * wherever this component happens to sit, the fan is positioned from the
- * toggle's real on-screen box — measured off the toggle via `onLayout` +
- * `measureInWindow` — rather than assumed to share an origin with it. The
- * `right`/`bottom` tab-bar-height formula below is both the toggle's own
- * position AND the fallback anchor for the brief window before the first
- * measurement lands (and for tests, where a real `onLayout` never fires) —
- * so the visual position is identical either way.
+ * The fan is positioned with the exact same `right`/`bottom` expressions the
+ * toggle itself sits on — not measured off the toggle. An earlier version
+ * measured the toggle's on-screen box via `onLayout` + `measureInWindow` and
+ * anchored the fan from that; on-device that put the mini buttons' visual
+ * paint and their touch hit-area in different places (clipped at the right
+ * edge, and untappable) — a mismatch between the async-measured value and
+ * Yoga's own layout pass. A `Modal`'s content spans the same device window
+ * as the rest of the app, so reusing the toggle's literal formula gives the
+ * fan the identical position synchronously, with nothing to race or drift.
  */
 export const FAB = ({ actions, source, icon = 'plus', label }: Props) => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const tabBarHeight = useContext(BottomTabBarHeightContext) ?? 0;
   const keyboardVisible = useKeyboardVisible();
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth } = useWindowDimensions();
   const [open, setOpen] = useState(false);
   const [rotation] = useState(() => new Animated.Value(0));
-  const toggleRef = useRef<View>(null);
-  /** The toggle's real on-screen box, in the `Modal`'s window coordinates. */
-  const [anchor, setAnchor] = useState<{ right: number; bottom: number } | null>(null);
 
   useEffect(() => {
     const toValue = open ? 1 : 0;
@@ -108,18 +106,16 @@ export const FAB = ({ actions, source, icon = 'plus', label }: Props) => {
   // Clears the tab bar when inside one, the home indicator otherwise — the
   // same source AppScreen's bottom padding reads, so the two stay in sync.
   const bottom = (tabBarHeight > 0 ? tabBarHeight : insets.bottom) + theme.spacing.lg;
+  // Same right inset the toggle sits on, reused verbatim (see the doc
+  // comment above) — this is what makes the fan land exactly on top of it.
+  const fanRight = theme.spacing.lg;
+  // Clears the toggle itself, the same way each row then clears the last.
+  const fanBottom = bottom + FAB_SIZE;
 
-  // Re-measured on every layout pass the toggle goes through — mount,
-  // tab-bar-height changes, keyboard visibility — so it never goes stale.
-  const measureAnchor = () => {
-    toggleRef.current?.measureInWindow((x, y, width) => {
-      setAnchor({ right: windowWidth - x - width, bottom: windowHeight - y });
-    });
-  };
-
-  // Falls back to the toggle's own formula until the first measurement lands.
-  const fanRight = anchor?.right ?? theme.spacing.lg;
-  const fanBottom = anchor?.bottom ?? bottom + FAB_SIZE;
+  // Caps the label chip so a long one truncates instead of reaching past the
+  // opposite (left) edge — the button's own position never depends on the
+  // chip's width, so it can't be the thing pushed off-screen either way.
+  const chipMaxWidth = windowWidth - theme.spacing.lg * 2 - MINI_SIZE - GAP;
 
   const toggle = () => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -174,20 +170,30 @@ export const FAB = ({ actions, source, icon = 'plus', label }: Props) => {
           style={StyleSheet.absoluteFill}
         >
           {actions.map((action, index) => (
+            // Shrink-wrapped, not full-width: with only `right` set (no
+            // `left`/`width`), the row sizes to its content and its right
+            // edge stays pinned at `fanRight` regardless of the chip's
+            // width, so the button — last in row order — always lands on
+            // that same edge. `alignSelf: 'flex-end'` names the same intent
+            // for a reader; positioning itself comes from `right` above.
             <View
               key={action.key}
+              testID={`fab-action-row-${action.key}`}
               pointerEvents="box-none"
               style={{
                 position: 'absolute',
                 right: fanRight,
                 bottom: fanBottom + GAP + index * ROW,
                 flexDirection: 'row',
+                alignSelf: 'flex-end',
                 alignItems: 'center',
                 gap: theme.spacing.sm,
               }}
             >
               <View
+                testID={`fab-chip-${action.key}`}
                 style={{
+                  maxWidth: chipMaxWidth,
                   backgroundColor: theme.colors.surface,
                   borderRadius: theme.radius.pill,
                   paddingHorizontal: theme.spacing.md,
@@ -212,6 +218,8 @@ export const FAB = ({ actions, source, icon = 'plus', label }: Props) => {
                   alignItems: 'center',
                   justifyContent: 'center',
                   backgroundColor: theme.colors.surface,
+                  borderWidth: theme.borderWidth.hairline,
+                  borderColor: theme.colors.border,
                   opacity: pressed ? theme.opacity.pressed : 1,
                   ...theme.elevation(2),
                 })}
@@ -223,12 +231,7 @@ export const FAB = ({ actions, source, icon = 'plus', label }: Props) => {
         </View>
       </Modal>
 
-      <View
-        ref={toggleRef}
-        onLayout={measureAnchor}
-        pointerEvents="box-none"
-        style={{ position: 'absolute', right: theme.spacing.lg, bottom }}
-      >
+      <View pointerEvents="box-none" style={{ position: 'absolute', right: theme.spacing.lg, bottom }}>
         <Pressable
           onPress={toggle}
           accessibilityRole="button"

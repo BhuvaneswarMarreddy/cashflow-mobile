@@ -1,7 +1,7 @@
 import { Animated, StyleSheet } from 'react-native';
 import * as Haptics from 'expo-haptics';
 
-import { colorsFor } from '@/theme/tokens';
+import { borderWidth, colorsFor, spacing } from '@/theme/tokens';
 import { fireEvent, renderWithProviders } from '@/test/render';
 
 import { FAB, type FabAction } from '../FAB';
@@ -121,6 +121,73 @@ describe('FAB', () => {
 
     expect(onPress).not.toHaveBeenCalled();
     expect(queryByTestId('fab-action-ask-ai')).toBeNull();
+  });
+
+  it("positions the fan row on the toggle's own right offset — not a measured origin", async () => {
+    const { getByLabelText, getByTestId } = await renderWithProviders(
+      <FAB actions={[action()]} source="home" />,
+    );
+
+    await fireEvent.press(getByLabelText('Quick actions'));
+
+    const rowStyle = StyleSheet.flatten(getByTestId('fab-action-row-ask-ai').props.style);
+    // Same literal expression the toggle itself is positioned with (see the
+    // FAB.tsx doc comment) — a `measureInWindow`-derived origin previously
+    // put the button's hit area somewhere other than its visual paint;
+    // reusing the identical number rules that class of bug out entirely.
+    expect(rowStyle.right).toBe(spacing.lg);
+    expect(rowStyle.alignSelf).toBe('flex-end');
+    expect(rowStyle.flexDirection).toBe('row');
+  });
+
+  it('caps the label chip and never moves the button, even for the longest current label', async () => {
+    const short = action({ label: 'Ask Cashflow' });
+    // Longest label among today's real fabActions call sites (Accounts'
+    // "Refresh from banks" / "Import a statement" are the same length class).
+    const long = action({ label: 'Refresh from banks' });
+
+    const shortRender = await renderWithProviders(<FAB actions={[short]} source="home" />);
+    await fireEvent.press(shortRender.getByLabelText('Quick actions'));
+    const shortRow = StyleSheet.flatten(
+      shortRender.getByTestId(`fab-action-row-${short.key}`).props.style,
+    );
+    const shortChip = StyleSheet.flatten(
+      shortRender.getByTestId(`fab-chip-${short.key}`).props.style,
+    );
+
+    const longRender = await renderWithProviders(<FAB actions={[long]} source="home" />);
+    await fireEvent.press(longRender.getByLabelText('Quick actions'));
+    const longRow = StyleSheet.flatten(
+      longRender.getByTestId(`fab-action-row-${long.key}`).props.style,
+    );
+    const longChip = StyleSheet.flatten(
+      longRender.getByTestId(`fab-chip-${long.key}`).props.style,
+    );
+
+    // The row's anchor — and so the button's position, last in row order —
+    // never depends on label length: a longer chip can only grow further
+    // to its own left.
+    expect(longRow.right).toBe(shortRow.right);
+    // The cap itself is derived from the window, not the text, so it does
+    // not grow with content either.
+    expect(longChip.maxWidth).toBe(shortChip.maxWidth);
+    expect(longChip.maxWidth).toBeGreaterThan(0);
+  });
+
+  it('gives the mini button a solid surface with a hairline border for contrast against the scrim', async () => {
+    const { getByLabelText, getByTestId } = await renderWithProviders(
+      <FAB actions={[action()]} source="home" />,
+    );
+
+    await fireEvent.press(getByLabelText('Quick actions'));
+
+    const buttonStyle = StyleSheet.flatten(getByTestId('fab-action-ask-ai').props.style);
+    expect(buttonStyle.backgroundColor).not.toBe('transparent');
+    expect(buttonStyle.borderWidth).toBe(borderWidth.hairline);
+    expect(buttonStyle.borderColor).toBeTruthy();
+
+    const chipStyle = StyleSheet.flatten(getByTestId('fab-chip-ask-ai').props.style);
+    expect(chipStyle.backgroundColor).not.toBe('transparent');
   });
 
   it('communicates the open state via accessibilityState', async () => {

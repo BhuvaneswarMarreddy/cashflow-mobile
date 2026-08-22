@@ -206,6 +206,20 @@ const RECORD_BILL_KEYS = [
 /** record_bill's own spend cap — mirrors `MAX_ASSUMED_SPEND`'s role for `set_monthly_spend`. */
 const MAX_BILL_AMOUNT = 100_000;
 
+/** firestore.rules bounds vendor at 1..200; mirror it rather than fail at the write. */
+const MAX_VENDOR_LENGTH = 200;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The server accepts an anchor date in [today-7d, today+400d]; anything outside
+ * that is a hallucinated schedule, not a real next payment.
+ */
+const isWithinAnchorWindow = (iso: string, now = Date.now()): boolean => {
+  const at = Date.parse(iso);
+  return at >= now - 7 * DAY_MS && at <= now + 400 * DAY_MS;
+};
+
 const isIsoDate = (value: string): boolean =>
   /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
 
@@ -222,7 +236,12 @@ const parseRecordBill = (raw: Record<string, unknown>): ChatAction | null => {
   if (!hasOnlyKeys(raw, RECORD_BILL_KEYS)) return null;
 
   const { vendor, amount, frequency, reason } = raw;
-  if (typeof vendor !== 'string' || vendor.trim().length === 0) return null;
+  // 200 is firestore.rules' own isValidString bound for vendor: a longer name
+  // parses and renders fine, then has its write rejected forever — a retry
+  // button that can never succeed.
+  if (typeof vendor !== 'string' || vendor.trim().length === 0 || vendor.length > MAX_VENDOR_LENGTH) {
+    return null;
+  }
   if (typeof reason !== 'string' || reason.trim().length === 0) return null;
   if (
     typeof amount !== 'number' ||
@@ -252,6 +271,9 @@ const parseRecordBill = (raw: Record<string, unknown>): ChatAction | null => {
   let nextDueDate: string | undefined;
   if (raw.nextDueDate !== undefined) {
     if (typeof raw.nextDueDate !== 'string' || !isIsoDate(raw.nextDueDate)) return null;
+    // Same sanity window as the server parser: a next payment date years out
+    // (or long past) is a hallucination, not a schedule.
+    if (!isWithinAnchorWindow(raw.nextDueDate)) return null;
     nextDueDate = raw.nextDueDate;
   }
 

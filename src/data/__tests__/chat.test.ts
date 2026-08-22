@@ -195,6 +195,43 @@ describe('parseChatAction', () => {
    * The parser already handles every one of these correctly — these pin that
    * behaviour so a future change can't regress it silently.
    */
+  describe('record_bill server parity', () => {
+    const base = {
+      action: 'record_bill',
+      vendor: 'Apple Card',
+      amount: 45.79,
+      frequency: 'monthly',
+      reason: 'r',
+    };
+
+    it('rejects a vendor longer than the 200-char rules bound', () => {
+      expect(parseChatAction({ ...base, vendor: 'A'.repeat(201) })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+      expect(parseChatAction({ ...base, vendor: 'A'.repeat(200) })).toMatchObject({
+        action: 'record_bill',
+      });
+    });
+
+    it('rejects a nextDueDate outside the server sanity window', () => {
+      const far = new Date(Date.now() + 500 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const longPast = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const soon = new Date(Date.now() + 20 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      expect(parseChatAction({ ...base, nextDueDate: far })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+      expect(parseChatAction({ ...base, nextDueDate: longPast })).toEqual({
+        action: 'answer',
+        explanation: "I can't do that from the phone yet.",
+      });
+      expect(parseChatAction({ ...base, nextDueDate: soon })).toMatchObject({
+        action: 'record_bill',
+      });
+    });
+  });
+
   describe('adversarial payloads (regression pins, not new behaviour)', () => {
     it('rejects a numeric action', () => {
       expect(parseChatAction({ action: 1, explanation: 'nope' })).toEqual({

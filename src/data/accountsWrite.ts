@@ -1,6 +1,12 @@
 import { collection, doc, serverTimestamp, setDoc } from '@firebase/firestore';
 
 import { AppError } from '@/errors';
+import {
+  CATEGORIES,
+  resolveCategories,
+  slugForCategoryLabel,
+  type CategoryOption,
+} from '@/features/activity/categories';
 import { triggerRefresh } from '@/hooks/useRefresh';
 import { loggerFor } from '@/logging';
 import { firebaseAuth, firestore, isFirebaseConfigured } from '@/services/firebase';
@@ -375,5 +381,126 @@ export const createBill = async (input: NewBill): Promise<string> => {
       retryable: true,
       cause: error,
     });
+  }
+};
+
+/**
+ * cashflow-mobile#24 — add_category/rename_category from chat.
+ *
+ * Same write target as `setAssumedMonthlySpend`/`setIncludePending`
+ * (`users/{uid}.settings`, merge) and the SAME shape the server's
+ * `resolveCategories()` reads (cashflow-forecast `src/types/index.ts`) — a
+ * slug mismatch here would create duplicate-looking categories between web
+ * and mobile.
+ *
+ * `homeSnapshot` only ever hands back the RESOLVED (defaults+custom) list,
+ * never the raw `settings.categories` array the write target actually is —
+ * `customCategoriesOf` reconstructs it by dropping anything matching a
+ * default value. Safe by construction: the server always resolves defaults
+ * first and drops any custom entry that collides with one, so "not a default
+ * value" IS "a custom entry", in the order it will write back in.
+ *
+ * No `removeCategory` here. Removing a category means reassigning every
+ * transaction, rule and bill filed under it first — mobile has no write path
+ * to any of those three collections (no local rules list, activity capped at
+ * 50 most-recent rows, no `category` field on the Bills digest at all). A
+ * partial or approximate reassignment would be worse than none; see
+ * `ChatSheet.tsx`'s `remove_category` handling, which explains this to the
+ * owner instead of faking a write.
+ */
+const isDefaultCategory = (value: string): boolean =>
+  CATEGORIES.some((category) => category.value === value);
+
+interface RawCustomCategory {
+  value: string;
+  label: string;
+  icon?: string;
+  archived?: boolean;
+}
+
+const customCategoriesOf = (resolved: readonly CategoryOption[]): RawCustomCategory[] =>
+  resolved
+    .filter((category) => !isDefaultCategory(category.value))
+    .map((category) => ({
+      value: category.value,
+      label: category.label,
+      ...(category.icon ? { icon: category.icon } : {}),
+      ...(category.archived ? { archived: true } : {}),
+    }));
+
+const requireUid = (action: string): string => {
+  const uid = firebaseAuth().currentUser?.uid;
+  if (!uid) {
+    throw new AppError({
+      category: 'authentication',
+      code: 'NOT_SIGNED_IN',
+      userMessage: 'Sign in again to change your categories.',
+      technicalMessage: `${action} called with no Firebase user`,
+      retryable: false,
+    });
+  }
+  return uid;
+};
+
+const writeCategories = async (uid: string, next: RawCustomCategory[]): Promise<void> => {
+  await setDoc(
+    doc(firestore(), 'users', uid),
+    { settings: { categories: next } },
+    { merge: true },
+  );
+};
+
+const throwCategoryWriteFailed = (error: unknown): never => {
+  throw new AppError({
+    category: 'data',
+    code: 'CATEGORY_WRITE_FAILED',
+    userMessage: "Cashflow couldn't save that category.",
+    technicalMessage: (error as { message?: string })?.message ?? 'setDoc failed',
+    retryable: true,
+    cause: error,
+  });
+};
+
+/** Adds a new custom category and returns its derived slug (`value`). */
+export const addCategory = async (label: string, icon?: string): Promise<string> => {
+  const uid = requireUid('addCategory');
+  const resolved = resolveCategories(useFinanceStore.getState().categories);
+  const current = customCategoriesOf(resolved);
+  const taken = new Set(resolved.map((category) => category.value));
+  const value = slugForCategoryLabel(label, taken);
+  const next = [...current, { value, label: label.trim(), ...(icon ? { icon } : {}) }];
+
+  try {
+    await writeCategories(uid, next);
+    // The shape only — a category label must not reach a log line.
+    log.info('category.added', { metadata: { hasIcon: icon !== undefined } });
+    triggerRefresh('tap');
+    return value;
+  } catch (error) {
+    log.warn('category.add_failed', {
+      metadata: { code: (error as { code?: string })?.code ?? 'unknown' },
+    });
+    return throwCategoryWriteFailed(error);
+  }
+};
+
+/** Renames an existing CUSTOM category. `value` never changes — only `label`. */
+export const renameCategory = async (value: string, label: string): Promise<void> => {
+  const uid = requireUid('renameCategory');
+  const resolved = resolveCategories(useFinanceStore.getState().categories);
+  const current = customCategoriesOf(resolved);
+  const next = current.map((category) =>
+    category.value === value ? { ...category, label: label.trim() } : category,
+  );
+
+  try {
+    await writeCategories(uid, next);
+    log.info('category.renamed');
+    triggerRefresh('tap');
+  } catch (error) {
+    log.warn('category.rename_failed', {
+      metadata: { code: (error as { code?: string })?.code ?? 'unknown' },
+    });
+    throwCategoryWriteFailed(error);
   }
 };

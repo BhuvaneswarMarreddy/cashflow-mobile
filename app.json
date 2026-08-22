@@ -11,12 +11,16 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
+      "buildNumber": "1",
       "bundleIdentifier": "com.marreddy.cashflow",
       "googleServicesFile": "./GoogleService-Info.plist",
       "appleTeamId": "TD86T4GJN3",
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "Cashflow loads its JavaScript from the Metro development server on your local network. Release builds do not use the local network.",
-        "NSBonjourServices": ["_expo._tcp", "_http._tcp"]
+        "NSBonjourServices": [
+          "_expo._tcp",
+          "_http._tcp"
+        ]
       }
     },
     "android": {

@@ -1,6 +1,9 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { NativeStackNavigationOptions } from '@react-navigation/native-stack';
+import { BlurView } from 'expo-blur';
+import { useEffect, useState } from 'react';
+import { Animated, StyleSheet, View } from 'react-native';
 
 import { usageAnalytics } from '@/analytics';
 import { Icon, type IconName } from '@/components';
@@ -112,6 +115,64 @@ const TAB_ICON: Record<keyof TabParamList, IconName> = {
   MoreTab: 'more-horizontal',
 };
 
+/**
+ * Glass tab bar background.
+ *
+ * `tabBarBackground` renders behind the bar's content, filling whatever the
+ * bar's own layout occupies — the blur, plus a translucent chrome tint on top
+ * so text and the gold active icon keep their contrast over whatever content
+ * is scrolling underneath.
+ */
+const TabBarBackground = () => {
+  const theme = useTheme();
+  return (
+    <View style={StyleSheet.absoluteFill}>
+      <BlurView
+        tint={theme.scheme === 'dark' ? 'dark' : 'light'}
+        intensity={theme.scheme === 'dark' ? 40 : 60}
+        style={StyleSheet.absoluteFill}
+      />
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.colors.chromeGlass }]} />
+    </View>
+  );
+};
+
+/** Springs the active tab's icon up to draw the eye, without reanimated. */
+const TabIcon = ({
+  name,
+  size,
+  color,
+  focused,
+}: {
+  name: IconName;
+  size: number;
+  color: string;
+  focused: boolean;
+}) => {
+  const theme = useTheme();
+  const [scale] = useState(() => new Animated.Value(focused ? 1.2 : 1));
+
+  useEffect(() => {
+    const toValue = focused ? 1.2 : 1;
+    if (theme.reduceMotion) {
+      scale.setValue(toValue);
+      return;
+    }
+    Animated.spring(scale, {
+      toValue,
+      friction: 6,
+      tension: 60,
+      useNativeDriver: true,
+    }).start();
+  }, [focused, scale, theme.reduceMotion]);
+
+  return (
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <Icon name={name} size={size} color={color} />
+    </Animated.View>
+  );
+};
+
 export const TabNavigator = () => {
   const theme = useTheme();
   const chromeOptions = useChromeOptions();
@@ -120,16 +181,23 @@ export const TabNavigator = () => {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         ...chromeOptions,
+        // 'shift' is the v7 built-in screen transition — no hand-rolled
+        // Animated wiring needed for switching tabs.
+        animation: 'shift',
         tabBarActiveTintColor: theme.colors.accent,
         tabBarInactiveTintColor: theme.colors.textTertiary,
+        // Absolute so the glass bar floats over content instead of reserving
+        // its own opaque strip; screens add matching bottom padding via
+        // useBottomTabBarHeight (see AppScreen, TransactionsList, FAB).
         tabBarStyle: {
-          backgroundColor: theme.colors.chrome,
+          position: 'absolute',
           borderTopColor: theme.colors.border,
         },
+        tabBarBackground: () => <TabBarBackground />,
         tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
         tabBarButtonTestID: `tab-${route.name}`,
-        tabBarIcon: ({ color, size }) => (
-          <Icon name={TAB_ICON[route.name]} size={size - 2} color={color} />
+        tabBarIcon: ({ color, size, focused }) => (
+          <TabIcon name={TAB_ICON[route.name]} size={size - 2} color={color} focused={focused} />
         ),
       })}
       screenListeners={{

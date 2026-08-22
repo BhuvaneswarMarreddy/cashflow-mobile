@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { BottomTabBarHeightContext } from '@react-navigation/bottom-tabs';
+import { useCallback, useContext, useEffect, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -74,7 +75,9 @@ const Lane = ({
       onPress={onPress}
       style={{ gap: theme.spacing.xs, paddingVertical: theme.spacing.xs }}
     >
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: theme.spacing.md }}>
+      <View
+        style={{ flexDirection: 'row', justifyContent: 'space-between', gap: theme.spacing.md }}
+      >
         <AppText variant="secondary" numberOfLines={1} style={{ flex: 1 }}>
           {node.label}
         </AppText>
@@ -110,6 +113,9 @@ const Lane = ({
 export const FlowView = () => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  // Same tab-bar-height source as TransactionsList/AppScreen/FAB, so the
+  // floating glass bar clears content consistently across the Activity tab.
+  const tabBarHeight = useContext(BottomTabBarHeightContext) ?? 0;
 
   const [range, setRange] = useState<FlowRange>('month');
   const [data, setData] = useState<FlowSnapshot | null>(null);
@@ -204,7 +210,7 @@ export const FlowView = () => {
     <ScrollView
       contentContainerStyle={{
         padding: theme.spacing.lg,
-        paddingBottom: insets.bottom + theme.spacing.huge,
+        paddingBottom: (tabBarHeight > 0 ? tabBarHeight : insets.bottom) + theme.spacing.huge,
         gap: theme.spacing.xl,
       }}
       refreshControl={
@@ -251,10 +257,10 @@ export const FlowView = () => {
             padding: 3,
           }}
         >
-          {([
+          {[
             { value: 'bars' as const, icon: 'bar-chart-2' as const, label: 'Bars' },
             { value: 'sankey' as const, icon: 'share-2' as const, label: 'Sankey' },
-          ]).map((option) => {
+          ].map((option) => {
             const selected = chart === option.value;
             return (
               <Pressable
@@ -315,7 +321,12 @@ export const FlowView = () => {
           <SectionHeader title="Money out" />
           <Card style={{ gap: theme.spacing.xs }}>
             {data.sinks.map((node) => (
-              <Lane key={node.id} node={node} largest={largestSink} onPress={() => openNode(node)} />
+              <Lane
+                key={node.id}
+                node={node}
+                largest={largestSink}
+                onPress={() => openNode(node)}
+              />
             ))}
           </Card>
         </View>
@@ -333,7 +344,11 @@ export const FlowView = () => {
             {data.betweenAccounts.map((move) => (
               <View
                 key={`${move.from}-${move.to}`}
-                style={{ flexDirection: 'row', justifyContent: 'space-between', gap: theme.spacing.md }}
+                style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  gap: theme.spacing.md,
+                }}
               >
                 <AppText variant="secondary" numberOfLines={1} style={{ flex: 1 }}>
                   {nameOf(move.from)} → {nameOf(move.to)}
@@ -362,7 +377,11 @@ export const FlowView = () => {
               .map((row) => (
                 <View
                   key={row.accountId}
-                  style={{ flexDirection: 'row', justifyContent: 'space-between', gap: theme.spacing.md }}
+                  style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    gap: theme.spacing.md,
+                  }}
                 >
                   <AppText variant="secondary" numberOfLines={1} style={{ flex: 1 }}>
                     {row.name}
@@ -416,14 +435,16 @@ export const FlowView = () => {
           <SkeletonCard lines={4} />
         ) : detail?.folded ? (
           <AppText variant="secondary" tone="textSecondary">
-            This lane groups several smaller ones together, so its rows cannot be attributed to
-            it individually. Open a named lane to see its transactions.
+            This lane groups several smaller ones together, so its rows cannot be attributed to it
+            individually. Open a named lane to see its transactions.
           </AppText>
         ) : detail && detail.rows.length > 0 ? (
           <View>
             <AppText variant="caption" tone="textTertiary">
               {detail.count} transaction{detail.count === 1 ? '' : 's'} · {detail.period.label}
-              {detail.count > detail.rows.length ? ` · showing the latest ${detail.rows.length}` : ''}
+              {detail.count > detail.rows.length
+                ? ` · showing the latest ${detail.rows.length}`
+                : ''}
             </AppText>
             {detail.rows.map((row, index) => (
               <View key={row.id}>
@@ -444,7 +465,9 @@ export const FlowView = () => {
                       {formatDate(row.date, 'short')} · {row.category}
                     </AppText>
                   </View>
-                  <AppText variant="amountSmall">{formatCurrency(Math.abs(row.amountCents))}</AppText>
+                  <AppText variant="amountSmall">
+                    {formatCurrency(Math.abs(row.amountCents))}
+                  </AppText>
                 </View>
               </View>
             ))}

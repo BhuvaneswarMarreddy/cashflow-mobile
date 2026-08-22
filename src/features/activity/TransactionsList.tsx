@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { BottomTabBarHeightContext } from '@react-navigation/bottom-tabs';
+import { useContext, useState } from 'react';
 import { RefreshControl, SectionList, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -44,6 +45,10 @@ const groupByDate = (transactions: readonly Transaction[]): Section[] => {
 export const TransactionsList = () => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  // The tab bar floats over content (glass effect); its real height, not just
+  // the safe-area inset, is what keeps the last row clear of it. Same source
+  // AppScreen and the FAB use, so all three stay in sync.
+  const tabBarHeight = useContext(BottomTabBarHeightContext) ?? 0;
   const { refreshing, onRefresh } = usePullToRefresh();
 
   // Owned here, not in CategorizeSheet: this is the one screen that knows
@@ -102,7 +107,7 @@ export const TransactionsList = () => {
         keyExtractor={(item) => item.id}
         stickySectionHeadersEnabled={false}
         contentContainerStyle={{
-          paddingBottom: insets.bottom + theme.spacing.huge,
+          paddingBottom: (tabBarHeight > 0 ? tabBarHeight : insets.bottom) + theme.spacing.huge,
           flexGrow: 1,
         }}
         refreshControl={

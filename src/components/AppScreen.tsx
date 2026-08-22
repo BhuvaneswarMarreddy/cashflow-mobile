@@ -36,9 +36,12 @@ interface Props {
  * The tab bar floats (`position: 'absolute'`, for the glass effect), so it no
  * longer reserves its own layout space — content would scroll under it
  * without this. `BottomTabBarHeightContext` reports the bar's real rendered
- * height and is 0 outside a tab (e.g. Sign in, a modal stack screen), where
- * `insets.bottom` is what is needed instead. FAB uses the same source, so the
- * two stay in sync.
+ * height and is 0 only when no tab bar is mounted at all (e.g. Sign in), where
+ * `insets.bottom` is what is needed instead. Note the context stays non-zero
+ * inside `presentation: 'modal'` screens nested in a tab's stack even though
+ * an iOS sheet covers the bar — those forms carry a little extra bottom
+ * padding, accepted as harmless. FAB uses the same source, so the two stay in
+ * sync.
  */
 export const AppScreen = ({
   children,

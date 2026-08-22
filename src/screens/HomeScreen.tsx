@@ -65,7 +65,10 @@ export const HomeScreen = () => {
     {
       key: 'record-cash',
       label: 'Record cash',
-      description: 'Not wired up yet — needs the backend',
+      // Reads as a VoiceOver hint now (FAB wires `description` to
+      // accessibilityHint) — "needs the backend" is an implementation note,
+      // not something to say to a user, so it's user-facing text here.
+      description: 'Not available yet',
       icon: 'dollar-sign',
       onPress: () =>
         usageAnalytics.track('action.selected', 'home', {

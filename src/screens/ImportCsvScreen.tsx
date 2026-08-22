@@ -87,7 +87,7 @@ export const ImportCsvScreen = () => {
   };
 
   return (
-    <AppScreen testID="screen-import-csv">
+    <AppScreen fabSource="accounts" testID="screen-import-csv">
       <View style={{ gap: theme.spacing.xl }}>
         <View>
           <SectionHeader

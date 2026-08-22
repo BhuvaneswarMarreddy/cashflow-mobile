@@ -72,15 +72,23 @@ export const refreshFinancialData = async (
     });
   }
 
-  const [snapshotResult, accountsResult, activityResult, upcomingResult, billsResult, goalsResult] =
-    await Promise.allSettled([
-      repositories.snapshot.current(),
-      repositories.accounts.list(),
-      repositories.activity.list({ limit: 50 }),
-      repositories.plan.upcoming(),
-      repositories.plan.bills(),
-      repositories.plan.goals(),
-    ]);
+  const [
+    snapshotResult,
+    accountsResult,
+    activityResult,
+    upcomingResult,
+    billsResult,
+    goalsResult,
+    categoriesResult,
+  ] = await Promise.allSettled([
+    repositories.snapshot.current(),
+    repositories.accounts.list(),
+    repositories.activity.list({ limit: 50 }),
+    repositories.plan.upcoming(),
+    repositories.plan.bills(),
+    repositories.plan.goals(),
+    repositories.plan.categories(),
+  ]);
 
   const failedSections: FinanceSection[] = [];
   const errors: AppError[] = [];
@@ -110,6 +118,7 @@ export const refreshFinancialData = async (
   const upcoming = collect('plan', upcomingResult);
   const bills = collect('plan', billsResult);
   const goals = collect('plan', goalsResult);
+  const categories = collect('plan', categoriesResult);
 
   // A failed bank sync is a PARTIAL refresh, not a clean one. The derivation
   // below still succeeds — it just re-derives yesterday's rows — so without this
@@ -167,6 +176,7 @@ export const refreshFinancialData = async (
     ...(transactions ? { transactions } : {}),
     ...(upcoming ? { upcoming } : {}),
     ...(bills ? { bills } : {}),
+    ...(categories ? { categories } : {}),
     ...(goals ? { goals } : {}),
     ...(snapshotBundle ? { paycheck: snapshotBundle.snapshot.nextPaycheck } : {}),
     changes,

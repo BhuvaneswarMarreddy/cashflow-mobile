@@ -1,3 +1,4 @@
+import type { CategoryOption } from '@/features/activity/categories';
 import type {
   Account,
   BillDigest,
@@ -42,6 +43,10 @@ export interface PlanRepository {
   bills(): Promise<BillDigest[]>;
   goals(): Promise<SavingsGoal[]>;
   nextPaycheck(): Promise<Paycheck | null>;
+  /** cashflow-mobile#24. The owner's resolved category set (defaults + custom,
+   *  archived preserved) — same idiom as `bills()`, threaded from the same
+   *  `homeSnapshot` payload. */
+  categories(): Promise<CategoryOption[]>;
 }
 
 export interface Repositories {

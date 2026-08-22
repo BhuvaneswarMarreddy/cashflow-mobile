@@ -36,5 +36,6 @@ export const mockRepositories: Repositories = {
     bills: () => respond('plan', (data) => data.bills),
     goals: () => respond('plan', (data) => data.goals),
     nextPaycheck: () => respond('plan', (data) => data.paycheck),
+    categories: () => respond('plan', (data) => data.categories),
   },
 };

@@ -1,3 +1,4 @@
+import { CATEGORIES, type CategoryOption } from '@/features/activity/categories';
 import type {
   Account,
   AppNotification,
@@ -32,6 +33,9 @@ export interface MockDataset {
   upcoming: UpcomingPayment[];
   /** The Bills register digest — recurring definitions, not projected occurrences. */
   bills: BillDigest[];
+  /** cashflow-mobile#24. Mock mode never models custom categories — always
+   *  the 13 defaults, exactly what a fresh owner's resolved set looks like. */
+  categories: CategoryOption[];
   goals: SavingsGoal[];
   paycheck: Paycheck | null;
   notifications: AppNotification[];
@@ -390,6 +394,7 @@ export const buildBaseDataset = (now: number): MockDataset => {
     transactions,
     upcoming,
     bills,
+    categories: [...CATEGORIES],
     goals,
     paycheck,
     notifications: [],

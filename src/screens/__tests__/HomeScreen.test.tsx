@@ -2,7 +2,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { buildBaseDataset } from '@/mocks/dataset';
 import { useFinanceStore } from '@/store/financeStore';
-import { renderWithProviders } from '@/test/render';
+import { fireEvent, renderWithProviders, waitFor } from '@/test/render';
 import { resetStores } from '@/test/stores';
 
 import { HomeScreen } from '../HomeScreen';
@@ -119,6 +119,16 @@ describe('HomeScreen', () => {
     const { getByText, queryByTestId } = await renderHome();
     expect(getByText('Not measured yet')).toBeTruthy();
     expect(queryByTestId('metric-runway-value')).toBeNull();
+  });
+
+  it('opens the chat sheet from the "Ask Cashflow" quick action', async () => {
+    loaded();
+    const { getByLabelText, getByText, getByTestId } = await renderHome();
+
+    await fireEvent.press(getByLabelText('Quick actions'));
+    await fireEvent.press(getByText('Ask Cashflow'));
+
+    await waitFor(() => expect(getByTestId('chat-input')).toBeTruthy());
   });
 
   it('surfaces accounts that failed to sync', async () => {

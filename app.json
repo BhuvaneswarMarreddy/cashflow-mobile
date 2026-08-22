@@ -63,6 +63,12 @@
         {
           "iosUrlScheme": "com.googleusercontent.apps.958007946272-omhu1ra8tbajbceai8nrk2q99a8k0rp3"
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Cashflow reads the screenshot you drop into the chat. Photos never leave your device except to answer that message."
+        }
       ]
     ]
   }

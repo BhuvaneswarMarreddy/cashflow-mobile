@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { View } from 'react-native';
 
 import { usageAnalytics } from '@/analytics';
+import { FAB, type FabAction } from '@/components';
 import { FlowView } from '@/features/activity/FlowView';
 import { TransactionsList } from '@/features/activity/TransactionsList';
+import { ChatSheet } from '@/features/chat/ChatSheet';
 import { SegmentedControl } from '@/features/settings/SegmentedControl';
 import { useTheme } from '@/theme';
 
@@ -29,6 +31,17 @@ const TABS: { value: ActivityTab; label: string }[] = [
 export const ActivityScreen = () => {
   const theme = useTheme();
   const [tab, setTab] = useState<ActivityTab>('transactions');
+  const [chatOpen, setChatOpen] = useState(false);
+
+  const fabActions: FabAction[] = [
+    {
+      key: 'ask-cashflow',
+      label: 'Ask Cashflow',
+      description: 'Ask a question, or drop in a screenshot',
+      icon: 'message-circle',
+      onPress: () => setChatOpen(true),
+    },
+  ];
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
@@ -54,6 +67,12 @@ export const ActivityScreen = () => {
           keeping it mounted behind Flow would hold its whole render window in
           memory for a tab nobody is looking at. */}
       {tab === 'transactions' ? <TransactionsList /> : <FlowView />}
+
+      {/* Not AppScreen here — Activity owns a custom two-tab layout, not a
+          single scroll region, so the FAB is mounted directly the same way
+          AppScreen mounts it internally. */}
+      <FAB actions={fabActions} source="activity" />
+      <ChatSheet visible={chatOpen} onClose={() => setChatOpen(false)} />
     </View>
   );
 };

@@ -4,12 +4,14 @@ import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 
 import { AppText, BottomSheet, Button, Card, IconButton, ListRow } from '@/components';
+import { setAssumedMonthlySpend } from '@/data/accountsWrite';
 import { sendChatTurn, type ChatAction, type ChatMessage } from '@/data/chat';
 import { applyMerchantRule, undoDecision, type ApplyDecisionResult } from '@/data/decisions';
 import { isAppError } from '@/errors';
 import { CATEGORIES } from '@/features/activity/categories';
 import { useTheme } from '@/theme';
 import type { Theme } from '@/theme';
+import { formatCurrency } from '@/utils/format';
 import { createId } from '@/utils/id';
 
 interface Props {
@@ -27,6 +29,15 @@ type ProposalState =
 
 type ProposalRule = Extract<ChatAction, { action: 'create_rule' }>['rule'];
 
+/** Same phase shape as `ProposalState`, minus the rule-specific `result` payload Undo needs here. */
+type SpendProposalState =
+  | { phase: 'pending' }
+  | { phase: 'applying' }
+  | { phase: 'error'; message: string }
+  | { phase: 'applied'; undoBusy: boolean; undoError: string | null }
+  | { phase: 'undone' }
+  | { phase: 'dismissed' };
+
 // Headroom under the server's 10MB request cap (see task-chat-brief.md).
 const MAX_IMAGE_BYTES = 9 * 1024 * 1024;
 
@@ -43,7 +54,8 @@ type Entry =
   // would grow this component's memory without bound across a long chat.
   | { id: string; kind: 'user'; text: string; image?: { uri: string; mimeType: string } }
   | { id: string; kind: 'text'; text: string }
-  | { id: string; kind: 'proposal'; rule: ProposalRule; explanation: string; state: ProposalState };
+  | { id: string; kind: 'proposal'; rule: ProposalRule; explanation: string; state: ProposalState }
+  | { id: string; kind: 'spend-proposal'; amountCents: number; reason: string; state: SpendProposalState };
 
 type Turn = { message: string; history: ChatMessage[]; image?: { base64: string; mimeType: string } };
 
@@ -64,6 +76,12 @@ const describeRule = (rule: ProposalRule): string => {
   return `When ${rule.match.field} ${verb} "${rule.match.value}", set ${setDescription(rule.set)}.`;
 };
 
+const describeSpendProposal = (amountCents: number): string =>
+  `Assume ${formatCurrency(amountCents)} a month for runway`;
+
+const describeSpendApplied = (amountCents: number): string =>
+  `Runway now assumes ${formatCurrency(amountCents)} a month`;
+
 /** Same "Mapped … — N transactions re-tallied" copy CategorizeSheet uses after a write. */
 const summarizeApplied = (rule: ProposalRule, result: ApplyDecisionResult): string => {
   const { transactionsMatched, monthsAffected } = result.changed;
@@ -81,7 +99,8 @@ const toHistory = (entries: Entry[]): ChatMessage[] =>
     if (entry.kind === 'user') return [{ role: 'user', content: entry.text }];
     if (entry.kind === 'text') return [{ role: 'assistant', content: entry.text }];
     if (entry.state.phase === 'dismissed') return [];
-    return [{ role: 'assistant', content: entry.explanation }];
+    if (entry.kind === 'proposal') return [{ role: 'assistant', content: entry.explanation }];
+    return [{ role: 'assistant', content: entry.reason }];
   });
 
 const bubble = (theme: Theme, key: string, text: string, align: 'flex-end' | 'flex-start') => (
@@ -156,18 +175,33 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
       const action = await sendChatTurn(turn);
       setSending(false);
       setLastTurn(null);
-      setEntries((previous) => [
-        ...previous,
-        action.action === 'create_rule'
-          ? {
+      setEntries((previous) => {
+        if (action.action === 'create_rule') {
+          return [
+            ...previous,
+            {
               id: createId('chat'),
               kind: 'proposal',
               rule: action.rule,
               explanation: action.explanation,
               state: { phase: 'pending' },
-            }
-          : { id: createId('chat'), kind: 'text', text: action.explanation },
-      ]);
+            },
+          ];
+        }
+        if (action.action === 'set_monthly_spend') {
+          return [
+            ...previous,
+            {
+              id: createId('chat'),
+              kind: 'spend-proposal',
+              amountCents: Math.round(action.amount * 100),
+              reason: action.reason,
+              state: { phase: 'pending' },
+            },
+          ];
+        }
+        return [...previous, { id: createId('chat'), kind: 'text', text: action.explanation }];
+      });
     } catch (error) {
       setSending(false);
       const message = isAppError(error) ? error.userMessage : "Cashflow couldn't reach the AI. Try again.";
@@ -319,6 +353,93 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
     );
   };
 
+  const updateSpendProposal = (id: string, state: SpendProposalState) =>
+    setEntries((previous) =>
+      previous.map((entry) =>
+        entry.id === id && entry.kind === 'spend-proposal' ? { ...entry, state } : entry,
+      ),
+    );
+
+  const applySpendProposal = async (entry: Extract<Entry, { kind: 'spend-proposal' }>) => {
+    if (entry.state.phase === 'applying' || entry.state.phase === 'applied') return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    updateSpendProposal(entry.id, { phase: 'applying' });
+    try {
+      await setAssumedMonthlySpend(entry.amountCents / 100);
+      updateSpendProposal(entry.id, { phase: 'applied', undoBusy: false, undoError: null });
+    } catch (error) {
+      const message = isAppError(error) ? error.userMessage : "Cashflow couldn't save that assumption.";
+      updateSpendProposal(entry.id, { phase: 'error', message });
+    }
+  };
+
+  const dismissSpendProposal = (entry: Extract<Entry, { kind: 'spend-proposal' }>) =>
+    updateSpendProposal(entry.id, { phase: 'dismissed' });
+
+  const undoSpendProposal = async (entry: Extract<Entry, { kind: 'spend-proposal' }>) => {
+    if (entry.state.phase !== 'applied' || entry.state.undoBusy) return;
+    updateSpendProposal(entry.id, { ...entry.state, undoBusy: true, undoError: null });
+    try {
+      await setAssumedMonthlySpend(null);
+      updateSpendProposal(entry.id, { phase: 'undone' });
+    } catch (error) {
+      const message = isAppError(error) ? error.userMessage : "Cashflow couldn't undo that assumption.";
+      updateSpendProposal(entry.id, { ...entry.state, undoBusy: false, undoError: message });
+    }
+  };
+
+  const renderSpendProposal = (entry: Extract<Entry, { kind: 'spend-proposal' }>) => {
+    const { state } = entry;
+
+    if (state.phase === 'dismissed') return bubble(theme, entry.id, entry.reason, 'flex-start');
+    if (state.phase === 'undone') return bubble(theme, entry.id, 'Undone — nothing changed.', 'flex-start');
+
+    if (state.phase === 'applied') {
+      return (
+        <Card key={entry.id} style={{ alignSelf: 'flex-start', maxWidth: '90%' }}>
+          <AppText variant="body" style={{ paddingBottom: theme.spacing.sm }}>
+            {describeSpendApplied(entry.amountCents)}
+          </AppText>
+          {state.undoError ? errorBanner(state.undoError) : null}
+          <ListRow
+            title="Undo"
+            leadingIcon="rotate-ccw"
+            onPress={state.undoBusy ? undefined : () => void undoSpendProposal(entry)}
+            testID="chat-spend-undo"
+          />
+        </Card>
+      );
+    }
+
+    return (
+      <Card key={entry.id} style={{ alignSelf: 'flex-start', maxWidth: '90%', gap: theme.spacing.sm }}>
+        <AppText variant="body">{describeSpendProposal(entry.amountCents)}</AppText>
+        <AppText variant="secondary" tone="textSecondary">
+          {entry.reason}
+        </AppText>
+        {state.phase === 'error' ? errorBanner(state.message) : null}
+        {state.phase === 'applying' ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+            <ActivityIndicator size="small" color={theme.colors.accent} />
+            <AppText variant="secondary" tone="textSecondary">
+              Saving…
+            </AppText>
+          </View>
+        ) : (
+          <View style={{ flexDirection: 'row', gap: theme.spacing.sm }}>
+            <Button label="Apply" onPress={() => void applySpendProposal(entry)} testID="chat-spend-apply" />
+            <Button
+              label="Dismiss"
+              variant="secondary"
+              onPress={() => dismissSpendProposal(entry)}
+              testID="chat-spend-dismiss"
+            />
+          </View>
+        )}
+      </Card>
+    );
+  };
+
   const footer = (
     <View style={{ gap: theme.spacing.sm }}>
       {attachError ? errorBanner(attachError) : null}
@@ -408,6 +529,7 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
             );
           }
           if (entry.kind === 'text') return bubble(theme, entry.id, entry.text, 'flex-start');
+          if (entry.kind === 'spend-proposal') return renderSpendProposal(entry);
           return renderProposal(entry);
         })}
 

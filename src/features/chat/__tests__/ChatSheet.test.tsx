@@ -3,6 +3,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { AppError } from '@/errors';
 import { fireEvent, renderWithProviders, waitFor } from '@/test/render';
 
+import { setAssumedMonthlySpend } from '@/data/accountsWrite';
 import { sendChatTurn } from '@/data/chat';
 import { applyMerchantRule, undoDecision } from '@/data/decisions';
 
@@ -22,6 +23,10 @@ jest.mock('@/data/decisions', () => ({
   undoDecision: jest.fn(),
 }));
 
+jest.mock('@/data/accountsWrite', () => ({
+  setAssumedMonthlySpend: jest.fn(),
+}));
+
 jest.mock('expo-image-picker', () => ({
   launchImageLibraryAsync: jest.fn(),
 }));
@@ -29,6 +34,7 @@ jest.mock('expo-image-picker', () => ({
 const mockSend = sendChatTurn as jest.Mock;
 const mockApply = applyMerchantRule as jest.Mock;
 const mockUndo = undoDecision as jest.Mock;
+const mockSetAssumedMonthlySpend = setAssumedMonthlySpend as jest.Mock;
 const mockPick = ImagePicker.launchImageLibraryAsync as jest.Mock;
 
 /** A base64 string that decodes to `bytes` bytes, no padding. */
@@ -174,6 +180,81 @@ describe('ChatSheet', () => {
     // The explanation survives as plain text; the actionable buttons do not.
     expect(getByText('Always mark Starbucks as Food & Dining.')).toBeTruthy();
     expect(queryByTestId('chat-proposal-apply')).toBeNull();
+  });
+
+  it('a set_monthly_spend action renders a proposal card with Apply and Dismiss', async () => {
+    mockSend.mockResolvedValue({
+      action: 'set_monthly_spend',
+      amount: 9000,
+      reason: 'You asked to plan around $9,000 a month.',
+    });
+    const { getByTestId, getByText } = await renderSheet();
+
+    await fireEvent.changeText(getByTestId('chat-input'), 'assume I spend 9000 a month');
+    await fireEvent.press(getByTestId('chat-send'));
+
+    await waitFor(() => expect(getByText('Assume $9,000 a month for runway')).toBeTruthy());
+    expect(getByText('You asked to plan around $9,000 a month.')).toBeTruthy();
+    expect(getByTestId('chat-spend-apply')).toBeTruthy();
+    expect(getByTestId('chat-spend-dismiss')).toBeTruthy();
+  });
+
+  it('Apply calls setAssumedMonthlySpend with dollars and swaps to a summary + Undo', async () => {
+    mockSend.mockResolvedValue({ action: 'set_monthly_spend', amount: 9000, reason: 'r' });
+    mockSetAssumedMonthlySpend.mockResolvedValue(undefined);
+    const { getByTestId, getByText, queryByTestId } = await renderSheet();
+
+    await fireEvent.changeText(getByTestId('chat-input'), 'assume I spend 9000 a month');
+    await fireEvent.press(getByTestId('chat-send'));
+    await waitFor(() => expect(getByTestId('chat-spend-apply')).toBeTruthy());
+
+    await fireEvent.press(getByTestId('chat-spend-apply'));
+
+    await waitFor(() => expect(mockSetAssumedMonthlySpend).toHaveBeenCalledTimes(1));
+    expect(mockSetAssumedMonthlySpend).toHaveBeenCalledWith(9000);
+
+    await waitFor(() => expect(getByText('Runway now assumes $9,000 a month')).toBeTruthy());
+    expect(getByTestId('chat-spend-undo')).toBeTruthy();
+    expect(queryByTestId('chat-spend-apply')).toBeNull();
+  });
+
+  it('Undo after Apply calls setAssumedMonthlySpend with null', async () => {
+    mockSend.mockResolvedValue({ action: 'set_monthly_spend', amount: 9000, reason: 'r' });
+    mockSetAssumedMonthlySpend.mockResolvedValue(undefined);
+    const { getByTestId, getByText } = await renderSheet();
+
+    await fireEvent.changeText(getByTestId('chat-input'), 'assume I spend 9000 a month');
+    await fireEvent.press(getByTestId('chat-send'));
+    await waitFor(() => expect(getByTestId('chat-spend-apply')).toBeTruthy());
+    await fireEvent.press(getByTestId('chat-spend-apply'));
+    await waitFor(() => expect(getByTestId('chat-spend-undo')).toBeTruthy());
+
+    await fireEvent.press(getByTestId('chat-spend-undo'));
+
+    await waitFor(() => expect(mockSetAssumedMonthlySpend).toHaveBeenLastCalledWith(null));
+    await waitFor(() => expect(getByText('Undone — nothing changed.')).toBeTruthy());
+  });
+
+  it('Dismiss on a spend proposal keeps the chat open and does not write', async () => {
+    mockSend.mockResolvedValue({
+      action: 'set_monthly_spend',
+      amount: 9000,
+      reason: 'You asked to plan around $9,000 a month.',
+    });
+    const onClose = jest.fn();
+    const { getByTestId, getByText, queryByTestId } = await renderSheet(onClose);
+
+    await fireEvent.changeText(getByTestId('chat-input'), 'assume I spend 9000 a month');
+    await fireEvent.press(getByTestId('chat-send'));
+    await waitFor(() => expect(getByTestId('chat-spend-dismiss')).toBeTruthy());
+
+    await fireEvent.press(getByTestId('chat-spend-dismiss'));
+
+    expect(mockSetAssumedMonthlySpend).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(getByText('assume I spend 9000 a month')).toBeTruthy();
+    expect(getByText('You asked to plan around $9,000 a month.')).toBeTruthy();
+    expect(queryByTestId('chat-spend-apply')).toBeNull();
   });
 
   it('shows the AppError userMessage inline on a send failure, with a retry', async () => {

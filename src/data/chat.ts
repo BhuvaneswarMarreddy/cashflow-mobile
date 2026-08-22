@@ -86,7 +86,15 @@ export type ChatAction =
    * parses but is never silently "applied" — `ChatSheet.tsx` renders it as an
    * explanation, not a write button.
    */
-  | { action: 'remove_category'; value: string; reassignTo: string; reason: string };
+  | { action: 'remove_category'; value: string; reassignTo: string; reason: string }
+  /**
+   * cashflow-mobile#25. A breakdown/comparison answer as a table instead of a
+   * paragraph — "what did I spend this month, and on what" as rows, not a
+   * wall of prose. DISPLAY ONLY: unlike every other action above, this never
+   * reaches a write path and `ChatSheet.tsx` never offers it an Apply/Undo —
+   * the table itself IS the whole answer, same as a plain `answer`.
+   */
+  | { action: 'report'; title: string; columns: string[]; rows: (string | number)[][]; note?: string };
 
 interface AiChatRequest {
   message?: string;
@@ -454,6 +462,80 @@ const parseRemoveCategory = (
   return { action: 'remove_category', value, reassignTo, reason };
 };
 
+// cashflow-mobile#25 — mirrors the server's own MAX bounds exactly
+// (cashflow-forecast `src/lib/chat-actions.ts` MAX.report*). Rejected when
+// oversized, never silently truncated: a chopped column header or dollar
+// figure is a WRONG table, not a smaller one.
+const MAX_REPORT_TITLE = 80;
+const MAX_REPORT_COLUMNS = 6;
+const MAX_REPORT_COLUMN_LABEL = 24;
+const MAX_REPORT_ROWS = 30;
+const MAX_REPORT_CELL = 40;
+const MAX_REPORT_NOTE = 200;
+
+const REPORT_KEYS = ['action', 'title', 'columns', 'rows', 'note'] as const;
+
+/**
+ * A trimmed string whose length falls inside [min, max], or null — REJECTED,
+ * never clipped (see the MAX_REPORT_* comment above). Mirrors the server's
+ * own `boundedStr`. `min` of 0 is how a report cell allows an empty string
+ * (present but says nothing) while title/columns/note still require content.
+ */
+const boundedStr = (value: unknown, min: number, max: number): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length >= min && trimmed.length <= max ? trimmed : null;
+};
+
+/**
+ * report (cashflow-mobile#25). Mirrors the server's own `report` branch
+ * (cashflow-forecast `src/lib/chat-actions.ts`) exactly — a mismatch here
+ * means the phone silently refuses a table the web app shows.
+ */
+const parseReport = (raw: Record<string, unknown>): ChatAction | null => {
+  if (!hasOnlyKeys(raw, REPORT_KEYS)) return null;
+
+  const title = boundedStr(raw.title, 1, MAX_REPORT_TITLE);
+  if (!title) return null;
+
+  if (!Array.isArray(raw.columns) || raw.columns.length === 0 || raw.columns.length > MAX_REPORT_COLUMNS) {
+    return null;
+  }
+  const columns: string[] = [];
+  for (const c of raw.columns) {
+    const label = boundedStr(c, 1, MAX_REPORT_COLUMN_LABEL);
+    if (!label) return null;
+    columns.push(label);
+  }
+
+  if (!Array.isArray(raw.rows) || raw.rows.length > MAX_REPORT_ROWS) return null;
+  const rows: (string | number)[][] = [];
+  for (const r of raw.rows) {
+    if (!Array.isArray(r) || r.length !== columns.length) return null;
+    const row: (string | number)[] = [];
+    for (const cell of r) {
+      if (typeof cell === 'number') {
+        if (!Number.isFinite(cell)) return null;
+        row.push(cell);
+      } else {
+        const s = boundedStr(cell, 0, MAX_REPORT_CELL);
+        if (s === null) return null;
+        row.push(s);
+      }
+    }
+    rows.push(row);
+  }
+
+  let note: string | undefined;
+  if (raw.note !== undefined) {
+    const n = boundedStr(raw.note, 1, MAX_REPORT_NOTE);
+    if (!n) return null;
+    note = n;
+  }
+
+  return { action: 'report', title, columns, rows, ...(note !== undefined ? { note } : {}) };
+};
+
 /**
  * Defensively parses an untrusted `aiChat` result into one of the shapes
  * mobile handles. Anything unrecognised, malformed, or carrying a
@@ -493,6 +575,7 @@ export const parseChatAction = (
   if (raw.action === 'add_category') return parseAddCategory(raw) ?? fallback();
   if (raw.action === 'rename_category') return parseRenameCategory(raw, categories) ?? fallback();
   if (raw.action === 'remove_category') return parseRemoveCategory(raw, categories) ?? fallback();
+  if (raw.action === 'report') return parseReport(raw) ?? fallback();
 
   return fallback();
 };

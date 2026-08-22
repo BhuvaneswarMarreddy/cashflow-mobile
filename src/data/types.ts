@@ -1,5 +1,6 @@
 import type {
   Account,
+  BillDigest,
   FinancialSnapshot,
   Paycheck,
   SavingsGoal,
@@ -37,6 +38,8 @@ export interface SnapshotRepository {
 
 export interface PlanRepository {
   upcoming(): Promise<UpcomingPayment[]>;
+  /** The Bills register digest — recurring definitions, not projected occurrences. */
+  bills(): Promise<BillDigest[]>;
   goals(): Promise<SavingsGoal[]>;
   nextPaycheck(): Promise<Paycheck | null>;
 }

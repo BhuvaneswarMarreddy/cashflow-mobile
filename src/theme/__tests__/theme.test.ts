@@ -101,9 +101,12 @@ describe('dark elevation', () => {
   });
 
   /**
-   * A 60% black scrim composites `background` down to ~#060608. `borderStrong`
-   * is the only thing giving the FAB's actions a boundary there, so it has to
-   * clear the 3:1 WCAG 1.4.11 floor against that composite — 1.42:1 was the
+   * The scrim plane is COMPOSITED from `overlay` over `background`, not
+   * hardcoded — otherwise raising the scrim's opacity would darken the backdrop
+   * and quietly push this boundary back under the floor with the test still
+   * green. `borderStrong` is the only thing giving the FAB's fan of actions an
+   * edge there, so it has to clear WCAG 1.4.11's 3:1 for component boundaries.
+   * The edge that actually shipped before this (`border`) scored 1.42:1 — the
    * measured cause of "the FAB blends into the background".
    */
   it('keeps borderStrong above the 3:1 boundary floor on the scrim plane', () => {
@@ -111,17 +114,23 @@ describe('dark elevation', () => {
       const s = c / 255;
       return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
     };
-    const luminance = (hex: string) => {
-      const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
-      return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
-    };
-    const ratio = (a: string, b: string) => {
+    const parse = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    const luminance = (rgb: number[]) =>
+      0.2126 * channel(rgb[0]) + 0.7152 * channel(rgb[1]) + 0.0722 * channel(rgb[2]);
+    const ratio = (a: number[], b: number[]) => {
       const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
       return (hi + 0.05) / (lo + 0.05);
     };
 
-    // background #101014 under rgba(0,0,0,0.6)
-    const scrim = '#060608';
-    expect(ratio(colorsFor('dark').borderStrong, scrim)).toBeGreaterThanOrEqual(3);
+    const dark = colorsFor('dark');
+    const [, r, g, b, alpha] = /rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/.exec(
+      dark.overlay,
+    ) as RegExpExecArray;
+    const a = Number(alpha);
+    const scrim = parse(dark.background).map((base, i) =>
+      Math.round(a * Number([r, g, b][i]) + (1 - a) * base),
+    );
+
+    expect(ratio(parse(dark.borderStrong), scrim)).toBeGreaterThanOrEqual(3);
   });
 });

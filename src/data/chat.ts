@@ -644,8 +644,19 @@ const CONTEXT_UPCOMING_CAP = 30;
  * dollars→cents conversion happens once on the way in.
  */
 const toDollars = (cents: number): number => Math.round(cents) / 100;
+
+/**
+ * `bills`/`upcoming` default to `[]` in the store from the moment the app boots — a cold
+ * store and a store that finished loading with genuinely nothing both look like `[]`.
+ * Sending `[]` in both cases would tell the server's ABSENT-vs-EMPTY gate (`upcomingProvided`
+ * in functions/src/prompts.ts, mirrored for bills) that the section is EMPTY when it may
+ * simply not have loaded yet — the model would then confidently say "you have nothing
+ * upcoming" instead of the honest "I can't see that here". `hasLoadedOnce` (financeStore)
+ * is the store's own signal that at least one refresh has completed, so it's the gate here
+ * too: omit both keys entirely (the wire equivalent of ABSENT) until then.
+ */
 const buildContext = (): ChatContext => {
-  const { accounts, transactions, bills, upcoming, categories: storeCategories } =
+  const { accounts, transactions, bills, upcoming, categories: storeCategories, hasLoadedOnce } =
     useFinanceStore.getState();
   return {
     // cashflow-mobile#24: the owner's resolved set, ASSIGNABLE only — an
@@ -661,20 +672,24 @@ const buildContext = (): ChatContext => {
       amount: toDollars(transaction.amountCents),
       category: transaction.category,
     })),
-    bills: bills.slice(0, CONTEXT_BILLS_CAP).map((bill) => ({
-      vendor: bill.vendor,
-      amount: toDollars(bill.amountCents),
-      frequency: bill.frequency,
-      nonNegotiable: bill.nonNegotiable,
-      endDate: bill.endDate,
-      installmentsRemaining: bill.installmentsRemaining,
-      method: bill.method,
-    })),
-    upcoming: upcoming.slice(0, CONTEXT_UPCOMING_CAP).map((payment) => ({
-      name: payment.name,
-      dueDate: payment.dueDate,
-      amount: toDollars(payment.amountCents),
-    })),
+    ...(hasLoadedOnce
+      ? {
+          bills: bills.slice(0, CONTEXT_BILLS_CAP).map((bill) => ({
+            vendor: bill.vendor,
+            amount: toDollars(bill.amountCents),
+            frequency: bill.frequency,
+            nonNegotiable: bill.nonNegotiable,
+            endDate: bill.endDate,
+            installmentsRemaining: bill.installmentsRemaining,
+            method: bill.method,
+          })),
+          upcoming: upcoming.slice(0, CONTEXT_UPCOMING_CAP).map((payment) => ({
+            name: payment.name,
+            dueDate: payment.dueDate,
+            amount: toDollars(payment.amountCents),
+          })),
+        }
+      : {}),
   };
 };
 

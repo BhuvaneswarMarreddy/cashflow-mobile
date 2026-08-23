@@ -183,8 +183,12 @@ describe('FAB', () => {
 
     const buttonStyle = StyleSheet.flatten(getByTestId('fab-action-ask-ai').props.style);
     expect(buttonStyle.backgroundColor).not.toBe('transparent');
-    expect(buttonStyle.borderWidth).toBe(borderWidth.hairline);
-    expect(buttonStyle.borderColor).toBeTruthy();
+    // Width comes from elevation(2) in dark and from this literal in light, so
+    // the meaningful assertion is the TOKEN, not a number: `border` scored
+    // 1.42:1 against the scrim, under the 3:1 boundary floor. That is what
+    // made the fan invisible.
+    expect(buttonStyle.borderWidth).toBeGreaterThanOrEqual(borderWidth.hairline);
+    expect(buttonStyle.borderColor).toBe(colorsFor('light').borderStrong);
 
     const chipStyle = StyleSheet.flatten(getByTestId('fab-chip-ask-ai').props.style);
     expect(chipStyle.backgroundColor).not.toBe('transparent');

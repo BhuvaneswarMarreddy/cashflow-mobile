@@ -235,7 +235,7 @@ export const ReviewScreen = () => {
                 borderRadius: theme.radius.control,
                 backgroundColor: theme.colors.surface,
                 borderWidth: theme.borderWidth.hairline,
-                borderColor: theme.colors.border,
+                borderColor: theme.colors.borderStrong,
                 opacity: busy ? theme.opacity.disabled : 1,
               }}
             >

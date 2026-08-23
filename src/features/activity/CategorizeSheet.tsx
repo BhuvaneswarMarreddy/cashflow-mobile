@@ -102,7 +102,14 @@ export const CategorizeSheet = ({ transaction, onClose }: Props) => {
     try {
       const result = await applyMerchantRule({
         match: { field, op: 'equals', value },
-        set: { category: category.value },
+        // BOTH fields, deliberately. The row renders the server's
+        // `sourceCategory ?? category` (functions/src/snapshot.ts), and every
+        // imported transaction carries a `sourceCategory` — the provider's own
+        // label. Setting `category` alone therefore re-tallied the maths, told
+        // the owner "37 transactions re-tallied", and left the row showing its
+        // old label forever. Chat has always set both (see the rule guidance in
+        // functions/src/prompts.ts); this is the tap path catching up.
+        set: { category: category.value, sourceCategory: category.label },
       });
       // Bail if the sheet switched transactions before this resolved: do not
       // attribute this write's result (and summary counts) to the new transaction.

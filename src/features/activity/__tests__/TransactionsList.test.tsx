@@ -69,7 +69,7 @@ describe('TransactionsList', () => {
     await waitFor(() =>
       expect(applyMerchantRule).toHaveBeenCalledWith({
         match: { field: 'merchant', op: 'equals', value: 'Blue Bottle' },
-        set: { category: 'food' },
+        set: { category: 'food', sourceCategory: 'Food & Dining' },
       }),
     );
   });

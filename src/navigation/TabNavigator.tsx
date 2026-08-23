@@ -191,7 +191,7 @@ export const TabNavigator = () => {
         // useBottomTabBarHeight (see AppScreen, TransactionsList, FAB).
         tabBarStyle: {
           position: 'absolute',
-          borderTopColor: theme.colors.border,
+          borderTopColor: theme.colors.borderStrong,
         },
         tabBarBackground: () => <TabBarBackground />,
         tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },

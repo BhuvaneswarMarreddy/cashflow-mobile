@@ -100,8 +100,17 @@ export const HomeScreen = () => {
             icon="pie-chart"
             title="Nothing to show yet"
             body="Connect an account and Cashflow will work out where you stand."
-            actionLabel="Refresh"
-            onAction={() => triggerRefresh('tap')}
+            // The button used to say "Refresh", which re-fetched the nothing
+            // that was already there — it contradicted the sentence above it
+            // and left a fresh install staring at a wall of $0.00 with no way
+            // forward. Send them where the copy already points.
+            actionLabel="Add an account"
+            onAction={() =>
+              navigation.navigate('Tabs', {
+                screen: 'AccountsTab',
+                params: { screen: 'AddAccount' },
+              })
+            }
           />
         )
       ) : (

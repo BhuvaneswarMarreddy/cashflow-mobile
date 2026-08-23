@@ -79,7 +79,9 @@ describe('CategorizeSheet', () => {
     await waitFor(() => expect(mockApply).toHaveBeenCalledTimes(1));
     expect(mockApply).toHaveBeenCalledWith({
       match: { field: 'merchant', op: 'equals', value: 'Starbucks' },
-      set: { category: 'transportation' },
+      // sourceCategory too: the row renders `sourceCategory ?? category`,
+      // so setting category alone changed the maths and not the label.
+      set: { category: 'transportation', sourceCategory: 'Transportation' },
     });
   });
 
@@ -97,7 +99,7 @@ describe('CategorizeSheet', () => {
     await waitFor(() => expect(mockApply).toHaveBeenCalledTimes(1));
     expect(mockApply).toHaveBeenCalledWith({
       match: { field: 'description', op: 'equals', value: 'POS DEBIT VISA 4821' },
-      set: { category: 'shopping' },
+      set: { category: 'shopping', sourceCategory: 'Shopping' },
     });
   });
 

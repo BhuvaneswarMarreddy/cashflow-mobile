@@ -50,7 +50,7 @@ export const SignInScreen = () => {
     borderRadius: theme.radius.control,
     backgroundColor: theme.colors.surfaceAlt,
     borderWidth: theme.borderWidth.hairline,
-    borderColor: theme.colors.border,
+    borderColor: theme.colors.borderStrong,
     color: theme.colors.textPrimary,
     ...theme.typography.body,
   };

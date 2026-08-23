@@ -83,7 +83,11 @@ export const refreshFinancialData = async (
   ] = await Promise.allSettled([
     repositories.snapshot.current(),
     repositories.accounts.list(),
-    repositories.activity.list({ limit: 50 }),
+    // The server already sends ACTIVITY_LIMIT = 200 and the slice happens on
+    // the device, so asking for 50 downloaded 200 rows and discarded 150. At a
+    // typical volume that is ~6 days of history instead of ~24, with no
+    // pagination anywhere — rows that fall out are gone from the phone.
+    repositories.activity.list({ limit: 200 }),
     repositories.plan.upcoming(),
     repositories.plan.bills(),
     repositories.plan.goals(),

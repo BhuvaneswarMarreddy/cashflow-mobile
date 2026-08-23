@@ -336,3 +336,36 @@ describe('CategorizeSheet', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * The wire `category` is the server's `sourceCategory ?? category` — the
+ * provider's LABEL ("Food & Dining"), not a slug ("food"). Comparing it to
+ * `category.value` was never true, so the "already filed here" checkmark was
+ * unreachable BY CONSTRUCTION — and stayed unreachable after categorizing,
+ * because the rule writes the label into `sourceCategory`.
+ *
+ * Not cosmetic: with no current-selection mark you re-tap, and
+ * `applyMerchantRule` writes a duplicate rule that then truthfully reports
+ * "0 transactions re-tallied across 0 months".
+ */
+describe('the current category is marked', () => {
+  const render = (category: string) =>
+    renderWithProviders(
+      <CategorizeSheet transaction={{ ...withMerchant, category }} onClose={jest.fn()} />,
+    );
+
+  it('matches on the provider label the row actually carries', async () => {
+    const view = await render('Food & Dining');
+    expect(view.getByLabelText('Food & Dining, current category')).toBeTruthy();
+  });
+
+  it('still matches when the row carries a slug', async () => {
+    const view = await render('food');
+    expect(view.getByLabelText('Food & Dining, current category')).toBeTruthy();
+  });
+
+  it('marks nothing when the row is filed elsewhere', async () => {
+    const view = await render('Shopping');
+    expect(view.queryByLabelText('Food & Dining, current category')).toBeNull();
+  });
+});

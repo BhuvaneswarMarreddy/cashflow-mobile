@@ -157,7 +157,15 @@ export const HomeScreen = () => {
                   the non-negotiable monthly floor. */}
               <MetricCard
                 label="Locked"
-                cents={snapshot.lockedMonthlyCents}
+                // `|| null`, not the raw figure. This sums only bills flagged
+                // non-negotiable in the register, so a phone-only owner with no
+                // register sees 0 — and the card then asserts $0 of fixed
+                // monthly cost to someone paying rent and a car note. That is
+                // exactly what MetricCard's own contract forbids: "$0 reads as
+                // a measured fact and is the single most expensive lie a money
+                // app can tell."
+                cents={snapshot.lockedMonthlyCents || null}
+                unavailableReason="Tell Cashflow about a bill and it will show here."
                 icon="lock"
                 footnote="a month, non-negotiable"
                 onPress={() => {

@@ -22,7 +22,7 @@ const ICON_FOR: Record<SnapshotChange['kind'], IconName> = {
  */
 export const ChangeList = ({
   changes,
-  hasBaseline = true,
+  hasBaseline,
 }: {
   changes: readonly SnapshotChange[];
   /**
@@ -31,8 +31,12 @@ export const ChangeList = ({
    * whatever THIS session already held — on a cold start there is none.
    * Without this flag an empty list says "nothing has changed", which on the
    * first open of the day is a claim the app cannot actually make.
+   *
+   * REQUIRED, with no default, on purpose: as an optional prop defaulting to
+   * true, deleting it at the call site silently restored the bug with every
+   * test still green. Now `tsc` catches that.
    */
-  hasBaseline?: boolean;
+  hasBaseline: boolean;
 }) => {
   const theme = useTheme();
 

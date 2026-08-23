@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode, type RefObject } from 'react';
 import {
   Animated,
   Easing,
@@ -26,6 +26,8 @@ interface Props {
   children: ReactNode;
   /** Pinned below the scrolling body, e.g. a chat input row — never scrolls away. */
   footer?: ReactNode;
+  /** Lets a consumer (e.g. a chat transcript) call `.scrollToEnd()` on the body. */
+  scrollRef?: RefObject<ScrollView | null>;
 }
 
 /** Drag further than this and releasing dismisses instead of springing back. */
@@ -47,10 +49,15 @@ const DISMISS_AFTER = 110;
  *  2. **Pinned header.** It sits outside the scroll view, so the close button
  *     cannot be carried off-screen by a long child. When it was inside, the
  *     only way out of the sheet was to force-quit the app.
- *  3. **Scrolling body**, with `flexShrink: 1` — without that the ScrollView
- *     keeps its full content height and the cap has no effect at all.
+ *  3. **Scrolling body**, with `flexShrink: 1` AND `flexGrow: 0` — without
+ *     `flexShrink` the ScrollView keeps its full content height and the cap
+ *     has no effect at all; without `flexGrow: 0` it swings the other way
+ *     and stretches to fill the cap even when content is much shorter (RN's
+ *     ScrollView.js default is `flexGrow: 1`), leaving dead space above the
+ *     footer instead of the sheet hugging short content. See the ScrollView
+ *     below for the full story.
  */
-export const BottomSheet = ({ visible, onClose, title, children, footer }: Props) => {
+export const BottomSheet = ({ visible, onClose, title, children, footer, scrollRef }: Props) => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
@@ -186,9 +193,21 @@ export const BottomSheet = ({ visible, onClose, title, children, footer }: Props
           </View>
 
           <ScrollView
+            ref={scrollRef}
+            testID="bottom-sheet-scroll"
             // flexShrink lets the body give way to the cap; without it the
-            // ScrollView keeps its full content height and the cap does nothing.
-            style={{ flexShrink: 1 }}
+            // ScrollView keeps its full content height and the cap does
+            // nothing. flexGrow: 0 is the other half: RN's ScrollView.js
+            // gives EVERY ScrollView (vertical included, not just horizontal
+            // ones — see `baseVertical`/`baseHorizontal` in ScrollView.js) a
+            // default flexGrow: 1. Left at that default, this ScrollView
+            // stretches to fill the sheet's maxHeight cap even when its
+            // content (the transcript) is much shorter — e.g. a single short
+            // report card — leaving dead space between the content and the
+            // footer. flexGrow: 0 makes the body hug the transcript's actual
+            // height instead; the cap (maxHeight above, flexShrink here)
+            // still applies once content genuinely exceeds it.
+            style={{ flexShrink: 1, flexGrow: 0 }}
             contentContainerStyle={{
               paddingHorizontal: theme.spacing.lg,
               // A footer supplies its own safe-area padding below; without a

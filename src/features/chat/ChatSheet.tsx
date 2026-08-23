@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Image, ScrollView, TextInput, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
@@ -9,6 +9,7 @@ import { resolveBillAnchor, sendChatTurn, type ChatAction, type ChatMessage } fr
 import { applyMerchantRule, undoDecision, type ApplyDecisionResult } from '@/data/decisions';
 import { isAppError } from '@/errors';
 import { resolveCategories, type CategoryOption } from '@/features/activity/categories';
+import { useKeyboardVisible } from '@/hooks/useKeyboardVisible';
 import { useFinanceStore } from '@/store/financeStore';
 import { useTheme } from '@/theme';
 import type { Theme } from '@/theme';
@@ -72,6 +73,11 @@ type CategoryProposalState =
 
 // Headroom under the server's 10MB request cap (see task-chat-brief.md).
 const MAX_IMAGE_BYTES = 9 * 1024 * 1024;
+
+// Composer auto-grow cap: starts at one line, grows with content, then
+// scrolls internally past this many lines — RN's multiline TextInput does
+// this natively off min/maxHeight alone, no manual measuring needed.
+const COMPOSER_MAX_LINES = 6;
 
 /** Decoded byte size of a base64 string: 3 bytes per 4 chars, minus padding. */
 const decodedBase64Size = (base64: string): number => {
@@ -298,6 +304,15 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
   // The exact request that failed, so "Try again" resends it without the
   // owner having to retype a message that's already in the transcript.
   const [lastTurn, setLastTurn] = useState<Turn | null>(null);
+
+  // Keeps the newest message in view: on every entry added, on send/receive
+  // (the "Thinking…" row appearing/disappearing), and when the keyboard opens
+  // (which shrinks the visible sheet body without changing its content).
+  const scrollRef = useRef<ScrollView>(null);
+  const keyboardVisible = useKeyboardVisible();
+  useEffect(() => {
+    scrollRef.current?.scrollToEnd({ animated: true });
+  }, [entries, sending, keyboardVisible]);
 
   const errorBanner = (message: string) => (
     <View
@@ -961,6 +976,17 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
     );
   };
 
+  // Empty message and no attachment: nothing to send. `sending` covers the
+  // in-flight turn so a second tap can't queue a duplicate.
+  const canSend = !sending && (input.trim().length > 0 || pendingImage !== null);
+
+  // One line to start, grows with content, caps at COMPOSER_MAX_LINES and
+  // scrolls internally past that — RN's own multiline auto-sizing does the
+  // growing, this only bounds it. `?? 23` guards typography.body.lineHeight's
+  // `number | undefined` type; the token itself is always set.
+  const composerLineHeight = theme.typography.body.lineHeight ?? 23;
+  const composerMaxHeight = composerLineHeight * COMPOSER_MAX_LINES + theme.spacing.sm * 2;
+
   const footer = (
     <View style={{ gap: theme.spacing.sm }}>
       {attachError ? errorBanner(attachError) : null}
@@ -984,7 +1010,25 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
           </View>
         </View>
       ) : null}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+      {/* Rounded pill holding every control, ChatGPT/Claude-style, rather
+          than three separate elements in a row. `alignItems: 'flex-start'`
+          is deliberate, not a default left over: it pins attach/send to the
+          TOP of the row so they track the FIRST line as the input grows,
+          instead of drifting to the vertical center of an increasingly tall
+          multiline box (`center` would do that). */}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'flex-start',
+          gap: theme.spacing.xs,
+          backgroundColor: theme.colors.surfaceAlt,
+          borderRadius: theme.radius.control,
+          borderWidth: theme.borderWidth.hairline,
+          borderColor: theme.colors.border,
+          paddingHorizontal: theme.spacing.xs,
+          paddingVertical: theme.spacing.xs,
+        }}
+      >
         <IconButton
           icon="image"
           onPress={() => void attach()}
@@ -997,19 +1041,19 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
           placeholder="Ask Cashflow…"
           placeholderTextColor={theme.colors.textTertiary}
           multiline
+          // Return key inserts a newline (multiline's native behaviour, no
+          // onSubmitEditing wired here) — sending is the button only, so the
+          // keyboard's return key never dismisses or submits mid-thought.
+          blurOnSubmit={false}
           editable={!sending}
           accessibilityLabel="Message"
           testID="chat-input"
           style={{
             flex: 1,
-            maxHeight: 96,
-            minHeight: theme.touchTarget.comfortable,
-            paddingHorizontal: theme.spacing.lg,
+            minHeight: theme.touchTarget.min,
+            maxHeight: composerMaxHeight,
+            paddingHorizontal: theme.spacing.sm,
             paddingVertical: theme.spacing.sm,
-            borderRadius: theme.radius.control,
-            backgroundColor: theme.colors.surfaceAlt,
-            borderWidth: theme.borderWidth.hairline,
-            borderColor: theme.colors.border,
             color: theme.colors.textPrimary,
             ...theme.typography.body,
           }}
@@ -1018,7 +1062,12 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
           icon="send"
           onPress={send}
           accessibilityLabel="Send"
-          disabled={sending || (input.trim().length === 0 && !pendingImage)}
+          disabled={!canSend}
+          // Accent when there's something to send, muted when there isn't —
+          // on top of IconButton's own disabled dimming, so "can I send"
+          // reads at a glance. Existing tokens only: accent is the same gold
+          // Button's primary variant uses, textTertiary already reads "off".
+          color={canSend ? theme.colors.accent : theme.colors.textTertiary}
           testID="chat-send"
         />
       </View>
@@ -1026,7 +1075,13 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
   );
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title="Ask Cashflow" footer={footer}>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      title="Ask Cashflow"
+      footer={footer}
+      scrollRef={scrollRef}
+    >
       <View style={{ gap: theme.spacing.md }}>
         {entries.length === 0 ? (
           <AppText variant="secondary" tone="textSecondary">

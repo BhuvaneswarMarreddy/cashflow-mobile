@@ -44,9 +44,10 @@ describe('createTheme', () => {
 
   it('uses a border for depth on dark, where a shadow is invisible', () => {
     const dark = createTheme('dark').elevation(2);
-    // Width is the rung (see "dark elevation" below), so this asserts the
-    // MECHANISM — an edge, never a shadow — not a particular thickness.
-    expect(dark.borderWidth).toBeGreaterThan(0);
+    // 2 is the rung level 2 sits on (see "dark elevation" below). Pinned to
+    // the exact width, not just "> 0" — a loose bound here would let the
+    // ladder collapse again without failing anything.
+    expect(dark.borderWidth).toBe(2);
     expect(dark.shadowOpacity).toBeUndefined();
   });
 

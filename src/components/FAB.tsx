@@ -198,6 +198,8 @@ export const FAB = ({ actions, source, icon = 'plus', label }: Props) => {
                   borderRadius: theme.radius.pill,
                   paddingHorizontal: theme.spacing.md,
                   paddingVertical: theme.spacing.xs,
+                  // Live in LIGHT, where elevation() returns a shadow and no
+                  // border. Dark's elevation(2) spreads after this and wins.
                   borderWidth: theme.borderWidth.hairline,
                   borderColor: theme.colors.borderStrong,
                   ...theme.elevation(2),

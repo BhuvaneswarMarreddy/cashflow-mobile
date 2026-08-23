@@ -762,3 +762,46 @@ describe('billDocument stamps an installment plan end', () => {
     }
   });
 });
+
+/**
+ * The month-end cases the first version of these tests missed.
+ *
+ * Every date pinned originally was anchored on 2026-08-06 — the one anchor that
+ * cannot expose a clamp difference. The PR claimed the two repos "pin the SAME
+ * dates so the two cannot drift silently", and that claim was hollow: the
+ * mobile port used a bare `setMonth`, which OVERFLOWS, while the forecast repo
+ * uses date-fns `addMonths`, which CLAMPS. 11 of 16 traced month-end anchors
+ * diverged. A bill recorded on the 31st expired on a different day depending on
+ * which client recorded it.
+ *
+ * These anchors are duplicated verbatim in cashflow-forecast's bills.test.ts.
+ * If either side drifts, one of the two suites fails.
+ */
+describe('billDocument clamps month-end anchors like date-fns addMonths', () => {
+  const at = (iso: string, extra: Partial<NewBill>) => {
+    jest.useFakeTimers().setSystemTime(Date.parse(`${iso}T12:00:00.000Z`));
+    try {
+      return billDocument(
+        { vendor: 'Apple Card', amountCents: 4_579, frequency: 'monthly', ...extra },
+        'manual',
+      ).endDate;
+    } finally {
+      jest.useRealTimers();
+    }
+  };
+
+  it('clamps to the shorter target month rather than overflowing into the next', () => {
+    // 2026-01-31 + 1 month is February 28th, NOT March 3rd.
+    expect(at('2026-01-31', { installmentsRemaining: 1 })).toBe('2026-02-28');
+    expect(at('2026-03-31', { installmentsRemaining: 1 })).toBe('2026-04-30');
+    expect(at('2026-08-31', { installmentsRemaining: 13 })).toBe('2027-09-30');
+  });
+
+  it('leaves a leap February on the 29th', () => {
+    expect(at('2028-01-31', { installmentsRemaining: 1 })).toBe('2028-02-29');
+  });
+
+  it('still agrees on the ordinary anchor', () => {
+    expect(at('2026-08-06', { installmentsRemaining: 13 })).toBe('2027-09-06');
+  });
+});

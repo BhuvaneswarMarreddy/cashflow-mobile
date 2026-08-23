@@ -116,8 +116,21 @@ const installmentEndFrom = (
   if (Number.isNaN(from.getTime())) return undefined;
   const months = MONTH_STEP[frequency];
   const end = new Date(from);
-  if (months !== undefined) end.setMonth(end.getMonth() + months * count);
-  else end.setDate(end.getDate() + (frequency === 'weekly' ? 7 : 14) * count);
+  if (months !== undefined) {
+    // CLAMP, matching date-fns `addMonths`, which is what the forecast repo
+    // uses. A bare `setMonth` OVERFLOWS: 2026-01-31 + 1 month becomes
+    // 2026-03-03, not 2026-02-28. The two clients then stamp different ends
+    // for the same bill depending on which one recorded it — 11 of 16 traced
+    // month-end anchors diverged. Move to the 1st first so the month change
+    // cannot overflow, then clamp the day to the target month's length.
+    const day = from.getDate();
+    end.setDate(1);
+    end.setMonth(end.getMonth() + months * count);
+    const daysInTarget = new Date(end.getFullYear(), end.getMonth() + 1, 0).getDate();
+    end.setDate(Math.min(day, daysInTarget));
+  } else {
+    end.setDate(end.getDate() + (frequency === 'weekly' ? 7 : 14) * count);
+  }
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`;
 };

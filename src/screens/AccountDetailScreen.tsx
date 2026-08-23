@@ -91,7 +91,10 @@ export const AccountDetailScreen = () => {
               {account.status === 'ok' ? (
                 <StatusChip label="Synced" tone="success" icon="check" />
               ) : account.status === 'stale' ? (
-                <StatusChip label="Out of date" tone="warning" icon="clock" />
+                // "Out of date" was a sync claim, and sat directly above a
+                // LastUpdated reading "2 minutes ago" — the card contradicted
+                // itself. The status means the balance has no opening anchor.
+                <StatusChip label="Balance unconfirmed" tone="warning" icon="help-circle" />
               ) : (
                 <StatusChip label="Sync failed" tone="error" icon="alert-triangle" />
               )}

@@ -248,7 +248,7 @@ export const HomeScreen = () => {
                       subtitle={
                         account.status === 'error'
                           ? "Cashflow couldn't reach this account"
-                          : 'This account has not synced recently'
+                          : 'Balance not confirmed by the bank — no opening figure on record'
                       }
                       leadingIcon="alert-triangle"
                       leadingTone="warning"

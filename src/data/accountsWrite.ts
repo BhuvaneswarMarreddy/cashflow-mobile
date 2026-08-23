@@ -10,6 +10,7 @@ import {
 import { triggerRefresh } from '@/hooks/useRefresh';
 import { loggerFor } from '@/logging';
 import { firebaseAuth, firestore, isFirebaseConfigured } from '@/services/firebase';
+import { refreshFinancialData } from '@/services/refresh';
 import { useFinanceStore } from '@/store/financeStore';
 import type { Account, AccountKind, BillFrequency } from '@/types';
 
@@ -359,10 +360,6 @@ export const createBill = async (input: NewBill): Promise<string> => {
     log.info('bill.created', {
       metadata: { frequency: input.frequency, resolvedAccount: paymentMethodId !== 'manual' },
     });
-    // Chat is a fire-and-forget write with no screen-level refresh of its own
-    // — same posture as `setAssumedMonthlySpend`.
-    triggerRefresh('tap');
-    return ref.id;
   } catch (error) {
     const code = (error as { code?: string })?.code;
     log.warn('bill.create_failed', { metadata: { code: code ?? 'unknown' } });
@@ -374,6 +371,31 @@ export const createBill = async (input: NewBill): Promise<string> => {
       cause: error,
     });
   }
+
+  // The document is durable now — but chat's "Saved" card renders the moment
+  // this promise resolves, and it claims the bill "shows in Upcoming and
+  // Bills". `triggerRefresh` (used elsewhere in this file) is fire-and-forget
+  // — its caller's promise resolves before the refresh lands, so a chat
+  // "Saved" card built on that pattern would be asserting an outcome nobody
+  // had checked yet. Awaiting the SAME refresh here, and confirming the row
+  // is actually in the store afterward, is what makes "Saved" true at the
+  // moment it is said instead of a hopeful prediction.
+  await refreshFinancialData('tap');
+  if (!useFinanceStore.getState().bills.some((bill) => bill.id === ref.id)) {
+    // ponytail: one refresh, one check — no polling/retry loop. The write
+    // already landed in Firestore (that try block above succeeded), so this
+    // is "couldn't confirm the mirror caught up", not "the save failed".
+    // Upgrade to a short bounded poll if a slow snapshot turns out to be
+    // common rather than rare.
+    throw new AppError({
+      category: 'data',
+      code: 'BILL_REFRESH_UNCONFIRMED',
+      userMessage: "Saved, but Cashflow couldn't confirm it's showing yet — pull to refresh and check Bills.",
+      technicalMessage: 'createBill: bill absent from store.bills after refreshFinancialData',
+      retryable: true,
+    });
+  }
+  return ref.id;
 };
 
 /**

@@ -3,8 +3,9 @@ import { doc, setDoc } from '@firebase/firestore';
 import { CATEGORIES } from '@/features/activity/categories';
 import { triggerRefresh } from '@/hooks/useRefresh';
 import { firebaseAuth } from '@/services/firebase';
+import { refreshFinancialData } from '@/services/refresh';
 import { useFinanceStore } from '@/store/financeStore';
-import type { Account } from '@/types';
+import type { Account, BillDigest } from '@/types';
 
 import {
   accountDocument,
@@ -25,9 +26,14 @@ import {
  * `decisions.test.ts` mocking the callable. This asserts the write SHAPE and
  * the refresh trigger, never re-derives what the server does with it.
  */
+// `doc()` needs an `.id` distinct from the plain `{ path }` the other
+// describe blocks use, so `createBill`'s post-refresh confirmation check
+// (`bills.some(bill => bill.id === ref.id)`) has something real to match.
+const NEW_DOC_ID = 'bill_new';
+
 jest.mock('@firebase/firestore', () => ({
   collection: jest.fn(),
-  doc: jest.fn(() => ({ path: 'users/u1' })),
+  doc: jest.fn(() => ({ path: 'users/u1', id: 'bill_new' })),
   serverTimestamp: jest.fn(() => 'SERVER_TIME'),
   setDoc: jest.fn(),
 }));
@@ -42,10 +48,15 @@ jest.mock('@/hooks/useRefresh', () => ({
   triggerRefresh: jest.fn(),
 }));
 
+jest.mock('@/services/refresh', () => ({
+  refreshFinancialData: jest.fn(),
+}));
+
 const mockSetDoc = setDoc as jest.Mock;
 const mockDoc = doc as jest.Mock;
 const mockFirebaseAuth = firebaseAuth as jest.Mock;
 const mockTriggerRefresh = triggerRefresh as jest.Mock;
+const mockRefreshFinancialData = refreshFinancialData as jest.Mock;
 
 /**
  * The opening anchor, and the dollars boundary.
@@ -369,16 +380,39 @@ describe('createBill', () => {
     nonNegotiable: true,
   };
 
+  /**
+   * What a real refresh would leave in the store once it actually picks up
+   * the new row — matched by `id` only, so every happy-path test below can
+   * share this default without restating vendor/amount per case.
+   */
+  const confirmedBill = (overrides: Partial<BillDigest> = {}): BillDigest => ({
+    id: NEW_DOC_ID,
+    vendor: 'Apple Card',
+    amountCents: 4_579,
+    frequency: 'monthly',
+    nonNegotiable: true,
+    endDate: null,
+    installmentsRemaining: 13,
+    method: null,
+    ...overrides,
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     mockSetDoc.mockResolvedValue(undefined);
     mockFirebaseAuth.mockReturnValue({ currentUser: { uid: 'u1' } });
-    useFinanceStore.setState({ accounts: [] });
+    useFinanceStore.setState({ accounts: [], bills: [] });
+    // Confirmed by default, as a real refresh would leave it — the one test
+    // that exercises the unconfirmed path overrides this.
+    mockRefreshFinancialData.mockImplementation(async () => {
+      useFinanceStore.setState({ bills: [confirmedBill()] });
+    });
   });
 
-  it('writes users/{uid}/bills with the resolved shape and triggers a refresh', async () => {
-    await createBill(input);
+  it('writes users/{uid}/bills with the resolved shape, awaits the refresh, and resolves once the bill is confirmed locally', async () => {
+    const id = await createBill(input);
 
+    expect(id).toBe(NEW_DOC_ID);
     expect(mockSetDoc).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -395,7 +429,29 @@ describe('createBill', () => {
         updatedAt: 'SERVER_TIME',
       }),
     );
-    expect(mockTriggerRefresh).toHaveBeenCalledWith('tap');
+    expect(mockRefreshFinancialData).toHaveBeenCalledWith('tap');
+    // The document write must land before the refresh is even asked for.
+    expect(mockSetDoc.mock.invocationCallOrder[0]).toBeLessThan(
+      mockRefreshFinancialData.mock.invocationCallOrder[0],
+    );
+  });
+
+  /**
+   * The honesty gap this exists to close: `triggerRefresh` (used elsewhere in
+   * this file) is fire-and-forget, so a caller awaiting only the write — not
+   * the refresh — could show "Saved" before the store agrees. `createBill`
+   * must not resolve until a refresh has actually run and the row confirmed.
+   */
+  it('throws a distinct, retryable error when the refresh completes without the bill showing up locally — the write itself still succeeded', async () => {
+    mockRefreshFinancialData.mockResolvedValue(undefined); // bills stays empty — never confirmed
+
+    await expect(createBill(input)).rejects.toMatchObject({
+      code: 'BILL_REFRESH_UNCONFIRMED',
+      category: 'data',
+      retryable: true,
+    });
+    expect(mockSetDoc).toHaveBeenCalled();
+    expect(mockRefreshFinancialData).toHaveBeenCalledWith('tap');
   });
 
   it('resolves paymentMethodId from accountName against the store accounts', async () => {
@@ -425,7 +481,7 @@ describe('createBill', () => {
 
     await expect(createBill(input)).rejects.toMatchObject({ code: 'NOT_SIGNED_IN' });
     expect(mockSetDoc).not.toHaveBeenCalled();
-    expect(mockTriggerRefresh).not.toHaveBeenCalled();
+    expect(mockRefreshFinancialData).not.toHaveBeenCalled();
   });
 
   it('wraps an unrecognised write failure into a retryable AppError (today\'s default) and does not refresh', async () => {
@@ -435,7 +491,7 @@ describe('createBill', () => {
       code: 'BILL_CREATE_FAILED',
       retryable: true,
     });
-    expect(mockTriggerRefresh).not.toHaveBeenCalled();
+    expect(mockRefreshFinancialData).not.toHaveBeenCalled();
   });
 
   it('wraps an already-gone rejection (not-found) into a NON-retryable AppError', async () => {
@@ -446,7 +502,7 @@ describe('createBill', () => {
       category: 'data',
       retryable: false,
     });
-    expect(mockTriggerRefresh).not.toHaveBeenCalled();
+    expect(mockRefreshFinancialData).not.toHaveBeenCalled();
   });
 });
 

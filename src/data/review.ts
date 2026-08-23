@@ -1,6 +1,6 @@
 import { httpsCallable } from '@firebase/functions';
 
-import { AppError } from '@/errors';
+import { AppError, errorFacetsFor } from '@/errors';
 import { loggerFor } from '@/logging';
 import { firebaseFunctions, isFirebaseConfigured } from '@/services/firebase';
 
@@ -94,15 +94,13 @@ export const resolveReview = async (input: {
     await callable(input);
     log.info('review.resolved', { metadata: { decision: input.decision } });
   } catch (error) {
-    log.warn('review.resolve_failed', {
-      metadata: { code: (error as { code?: string })?.code ?? 'unknown' },
-    });
+    const code = (error as { code?: string })?.code;
+    log.warn('review.resolve_failed', { metadata: { code: code ?? 'unknown' } });
     throw new AppError({
-      category: 'data',
+      ...errorFacetsFor(code),
       code: 'REVIEW_WRITE_FAILED',
       userMessage: "Cashflow couldn't save that decision.",
       technicalMessage: (error as { message?: string })?.message ?? 'resolveReview failed',
-      retryable: true,
       cause: error,
     });
   }

@@ -1197,44 +1197,62 @@ describe('sendChatTurn', () => {
     expect(mockHttpsCallable).not.toHaveBeenCalled();
   });
 
-  it('maps resource-exhausted to the daily limit message', async () => {
+  // `@firebase/functions` always prefixes the code with `functions/` (see
+  // `errorFacetsFor`'s own comment) — these mocks use the REAL shape a
+  // callable rejection has, not the bare code the old buggy comparison
+  // expected. A bare `'resource-exhausted'` mock would never occur in
+  // production and would mask the HIGH finding these tests exist to pin.
+  it('maps functions/resource-exhausted to the daily limit message, not retryable', async () => {
     const callable = jest
       .fn()
-      .mockRejectedValue(Object.assign(new Error('quota'), { code: 'resource-exhausted' }));
+      .mockRejectedValue(Object.assign(new Error('quota'), { code: 'functions/resource-exhausted' }));
     mockHttpsCallable.mockReturnValue(callable);
 
     await expect(sendChatTurn({ message: 'hi', history: [] })).rejects.toMatchObject({
+      code: 'AI_LIMIT_REACHED',
+      category: 'service-unavailable',
       userMessage: 'Daily AI limit reached — try again tomorrow.',
       retryable: false,
     });
   });
 
-  it('maps unavailable to the AI-not-configured message', async () => {
-    const callable = jest.fn().mockRejectedValue(Object.assign(new Error('nope'), { code: 'unavailable' }));
+  it('maps functions/unavailable to the AI-not-configured message, not retryable', async () => {
+    const callable = jest
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('nope'), { code: 'functions/unavailable' }));
     mockHttpsCallable.mockReturnValue(callable);
 
     await expect(sendChatTurn({ message: 'hi', history: [] })).rejects.toMatchObject({
+      code: 'AI_NOT_CONFIGURED',
+      category: 'service-unavailable',
       userMessage: 'AI is not configured.',
+      retryable: false,
     });
   });
 
-  it('maps unauthenticated to the sign-in message', async () => {
+  it('maps functions/unauthenticated to the sign-in message, not retryable', async () => {
     const callable = jest
       .fn()
-      .mockRejectedValue(Object.assign(new Error('nope'), { code: 'unauthenticated' }));
+      .mockRejectedValue(Object.assign(new Error('nope'), { code: 'functions/unauthenticated' }));
     mockHttpsCallable.mockReturnValue(callable);
 
     await expect(sendChatTurn({ message: 'hi', history: [] })).rejects.toMatchObject({
+      code: 'AI_UNAUTHENTICATED',
       category: 'authentication',
       userMessage: 'Your session has expired. Sign in again to continue.',
+      retryable: false,
     });
   });
 
   it('maps any other failure to a retryable data error', async () => {
-    const callable = jest.fn().mockRejectedValue(Object.assign(new Error('boom'), { code: 'internal' }));
+    const callable = jest
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('boom'), { code: 'functions/internal' }));
     mockHttpsCallable.mockReturnValue(callable);
 
     await expect(sendChatTurn({ message: 'hi', history: [] })).rejects.toMatchObject({
+      code: 'CHAT_FAILED',
+      category: 'data',
       retryable: true,
     });
   });

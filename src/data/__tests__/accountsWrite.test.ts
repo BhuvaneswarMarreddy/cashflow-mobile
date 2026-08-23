@@ -10,10 +10,12 @@ import {
   accountDocument,
   addCategory,
   billDocument,
+  createAccount,
   createBill,
   renameCategory,
   resolvePaymentMethodId,
   setAssumedMonthlySpend,
+  setIncludePending,
   type NewAccount,
   type NewBill,
 } from '../accountsWrite';
@@ -135,6 +137,96 @@ describe('accountDocument', () => {
   });
 });
 
+describe('createAccount', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockSetDoc.mockResolvedValue(undefined);
+    mockFirebaseAuth.mockReturnValue({ currentUser: { uid: 'u1' } });
+  });
+
+  it('writes users/{uid}/accounts and triggers a refresh', async () => {
+    await createAccount(base, 0);
+
+    expect(mockSetDoc).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ name: 'Apple Card', type: 'credit_card' }),
+    );
+  });
+
+  it('throws NOT_SIGNED_IN and never writes when there is no user', async () => {
+    mockFirebaseAuth.mockReturnValue({ currentUser: null });
+
+    await expect(createAccount(base, 0)).rejects.toMatchObject({ code: 'NOT_SIGNED_IN' });
+    expect(mockSetDoc).not.toHaveBeenCalled();
+  });
+
+  // Direct `setDoc` writes go through the Firestore SDK, which — unlike a
+  // Callable — never prefixes its error code with `functions/`.
+  // errorFacetsFor must handle both transports.
+  it('wraps a malformed-write rejection (invalid-argument) into a NON-retryable AppError', async () => {
+    mockSetDoc.mockRejectedValue(Object.assign(new Error('bad doc'), { code: 'invalid-argument' }));
+
+    await expect(createAccount(base, 0)).rejects.toMatchObject({
+      code: 'ACCOUNT_CREATE_FAILED',
+      category: 'validation',
+      retryable: false,
+    });
+  });
+
+  it('keeps the retryable default for an unrecognised code', async () => {
+    mockSetDoc.mockRejectedValue(new Error('boom'));
+
+    await expect(createAccount(base, 0)).rejects.toMatchObject({
+      code: 'ACCOUNT_CREATE_FAILED',
+      retryable: true,
+    });
+  });
+});
+
+describe('setIncludePending', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockSetDoc.mockResolvedValue(undefined);
+    mockFirebaseAuth.mockReturnValue({ currentUser: { uid: 'u1' } });
+  });
+
+  it('merge-writes the flag under settings.includePendingInCalculations', async () => {
+    await setIncludePending(true);
+
+    expect(mockSetDoc).toHaveBeenCalledWith(
+      expect.anything(),
+      { settings: { includePendingInCalculations: true } },
+      { merge: true },
+    );
+  });
+
+  it('throws NOT_SIGNED_IN and never writes when there is no user', async () => {
+    mockFirebaseAuth.mockReturnValue({ currentUser: null });
+
+    await expect(setIncludePending(true)).rejects.toMatchObject({ code: 'NOT_SIGNED_IN' });
+    expect(mockSetDoc).not.toHaveBeenCalled();
+  });
+
+  it('wraps a gone-document rejection (not-found) into a NON-retryable AppError', async () => {
+    mockSetDoc.mockRejectedValue(Object.assign(new Error('gone'), { code: 'not-found' }));
+
+    await expect(setIncludePending(true)).rejects.toMatchObject({
+      code: 'PENDING_POLICY_WRITE_FAILED',
+      category: 'data',
+      retryable: false,
+    });
+  });
+
+  it('keeps the retryable default for an unrecognised code', async () => {
+    mockSetDoc.mockRejectedValue(new Error('boom'));
+
+    await expect(setIncludePending(true)).rejects.toMatchObject({
+      code: 'PENDING_POLICY_WRITE_FAILED',
+      retryable: true,
+    });
+  });
+});
+
 describe('setAssumedMonthlySpend', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -173,12 +265,23 @@ describe('setAssumedMonthlySpend', () => {
     expect(mockTriggerRefresh).not.toHaveBeenCalled();
   });
 
-  it('wraps a write failure into a retryable AppError and does not refresh', async () => {
+  it('wraps an unrecognised write failure into a retryable AppError (today\'s default) and does not refresh', async () => {
     mockSetDoc.mockRejectedValue(new Error('boom'));
 
     await expect(setAssumedMonthlySpend(9000)).rejects.toMatchObject({
       code: 'ASSUMED_SPEND_WRITE_FAILED',
       retryable: true,
+    });
+    expect(mockTriggerRefresh).not.toHaveBeenCalled();
+  });
+
+  it('wraps a malformed-write rejection (invalid-argument) into a NON-retryable AppError', async () => {
+    mockSetDoc.mockRejectedValue(Object.assign(new Error('too high'), { code: 'invalid-argument' }));
+
+    await expect(setAssumedMonthlySpend(9000)).rejects.toMatchObject({
+      code: 'ASSUMED_SPEND_WRITE_FAILED',
+      category: 'validation',
+      retryable: false,
     });
     expect(mockTriggerRefresh).not.toHaveBeenCalled();
   });
@@ -325,12 +428,23 @@ describe('createBill', () => {
     expect(mockTriggerRefresh).not.toHaveBeenCalled();
   });
 
-  it('wraps a write failure into a retryable AppError and does not refresh', async () => {
+  it('wraps an unrecognised write failure into a retryable AppError (today\'s default) and does not refresh', async () => {
     mockSetDoc.mockRejectedValue(new Error('boom'));
 
     await expect(createBill(input)).rejects.toMatchObject({
       code: 'BILL_CREATE_FAILED',
       retryable: true,
+    });
+    expect(mockTriggerRefresh).not.toHaveBeenCalled();
+  });
+
+  it('wraps an already-gone rejection (not-found) into a NON-retryable AppError', async () => {
+    mockSetDoc.mockRejectedValue(Object.assign(new Error('gone'), { code: 'not-found' }));
+
+    await expect(createBill(input)).rejects.toMatchObject({
+      code: 'BILL_CREATE_FAILED',
+      category: 'data',
+      retryable: false,
     });
     expect(mockTriggerRefresh).not.toHaveBeenCalled();
   });
@@ -432,12 +546,26 @@ describe('addCategory', () => {
     expect(mockTriggerRefresh).not.toHaveBeenCalled();
   });
 
-  it('wraps a write failure into a retryable AppError and does not refresh', async () => {
+  it('wraps an unrecognised write failure into a retryable AppError (today\'s default) and does not refresh', async () => {
     mockSetDoc.mockRejectedValue(new Error('boom'));
 
     await expect(addCategory('Vacations')).rejects.toMatchObject({
       code: 'CATEGORY_WRITE_FAILED',
       retryable: true,
+    });
+    expect(mockTriggerRefresh).not.toHaveBeenCalled();
+  });
+
+  // `throwCategoryWriteFailed` is the ONE shared helper behind both
+  // addCategory and renameCategory (see the renameCategory suite below,
+  // which relies on the same fix without re-testing every code here).
+  it('wraps a malformed-write rejection (invalid-argument) into a NON-retryable AppError', async () => {
+    mockSetDoc.mockRejectedValue(Object.assign(new Error('bad label'), { code: 'invalid-argument' }));
+
+    await expect(addCategory('Vacations')).rejects.toMatchObject({
+      code: 'CATEGORY_WRITE_FAILED',
+      category: 'validation',
+      retryable: false,
     });
     expect(mockTriggerRefresh).not.toHaveBeenCalled();
   });
@@ -508,12 +636,23 @@ describe('renameCategory', () => {
     expect(mockTriggerRefresh).not.toHaveBeenCalled();
   });
 
-  it('wraps a write failure into a retryable AppError and does not refresh', async () => {
+  it('wraps an unrecognised write failure into a retryable AppError (today\'s default) and does not refresh', async () => {
     mockSetDoc.mockRejectedValue(new Error('boom'));
 
     await expect(renameCategory('vacations', 'Trips')).rejects.toMatchObject({
       code: 'CATEGORY_WRITE_FAILED',
       retryable: true,
+    });
+    expect(mockTriggerRefresh).not.toHaveBeenCalled();
+  });
+
+  it('wraps an already-gone rejection (not-found) into a NON-retryable AppError, via the shared throwCategoryWriteFailed', async () => {
+    mockSetDoc.mockRejectedValue(Object.assign(new Error('gone'), { code: 'not-found' }));
+
+    await expect(renameCategory('vacations', 'Trips')).rejects.toMatchObject({
+      code: 'CATEGORY_WRITE_FAILED',
+      category: 'data',
+      retryable: false,
     });
     expect(mockTriggerRefresh).not.toHaveBeenCalled();
   });

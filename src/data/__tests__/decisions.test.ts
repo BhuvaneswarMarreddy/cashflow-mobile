@@ -65,17 +65,33 @@ describe('applyMerchantRule', () => {
     expect(mockTriggerRefresh).not.toHaveBeenCalled();
   });
 
-  it('wraps a callable rejection into a retryable AppError and does not refresh', async () => {
+  it('wraps a malformed-rule rejection (functions/invalid-argument) into a NON-retryable AppError', async () => {
+    // A malformed rule is not fixed by retrying the identical request —
+    // `functions/invalid-argument` is the real, prefixed code a Callable
+    // rejection carries (see errorFacetsFor).
     const callable = jest
       .fn()
-      .mockRejectedValue(Object.assign(new Error('bad match'), { code: 'invalid-argument' }));
+      .mockRejectedValue(Object.assign(new Error('bad match'), { code: 'functions/invalid-argument' }));
+    mockHttpsCallable.mockReturnValue(callable);
+
+    await expect(applyMerchantRule({ match, set })).rejects.toMatchObject({
+      code: 'DECISION_WRITE_FAILED',
+      category: 'validation',
+      retryable: false,
+    });
+    expect(mockTriggerRefresh).not.toHaveBeenCalled();
+  });
+
+  it('keeps the retryable default for an unrecognised code', async () => {
+    const callable = jest
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('boom'), { code: 'functions/internal' }));
     mockHttpsCallable.mockReturnValue(callable);
 
     await expect(applyMerchantRule({ match, set })).rejects.toMatchObject({
       code: 'DECISION_WRITE_FAILED',
       retryable: true,
     });
-    expect(mockTriggerRefresh).not.toHaveBeenCalled();
   });
 });
 
@@ -99,16 +115,31 @@ describe('undoDecision', () => {
     expect(mockTriggerRefresh).not.toHaveBeenCalled();
   });
 
-  it('wraps a callable rejection into a retryable AppError and does not refresh', async () => {
+  it('wraps an already-gone rejection (functions/not-found) into a NON-retryable AppError', async () => {
+    // The rule is already gone — retrying the identical undo can never
+    // succeed. `functions/not-found` is the real, prefixed code.
     const callable = jest
       .fn()
-      .mockRejectedValue(Object.assign(new Error('gone'), { code: 'not-found' }));
+      .mockRejectedValue(Object.assign(new Error('gone'), { code: 'functions/not-found' }));
+    mockHttpsCallable.mockReturnValue(callable);
+
+    await expect(undoDecision('d1')).rejects.toMatchObject({
+      code: 'DECISION_WRITE_FAILED',
+      category: 'data',
+      retryable: false,
+    });
+    expect(mockTriggerRefresh).not.toHaveBeenCalled();
+  });
+
+  it('keeps the retryable default for an unrecognised code', async () => {
+    const callable = jest
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('boom'), { code: 'functions/internal' }));
     mockHttpsCallable.mockReturnValue(callable);
 
     await expect(undoDecision('d1')).rejects.toMatchObject({
       code: 'DECISION_WRITE_FAILED',
       retryable: true,
     });
-    expect(mockTriggerRefresh).not.toHaveBeenCalled();
   });
 });

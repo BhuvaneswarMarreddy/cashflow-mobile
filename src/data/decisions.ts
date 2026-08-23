@@ -1,6 +1,6 @@
 import { httpsCallable } from '@firebase/functions';
 
-import { AppError } from '@/errors';
+import { AppError, errorFacetsFor } from '@/errors';
 import { triggerRefresh } from '@/hooks/useRefresh';
 import { loggerFor } from '@/logging';
 import { firebaseFunctions, isFirebaseConfigured } from '@/services/firebase';
@@ -82,15 +82,13 @@ export const applyMerchantRule = async (input: {
     triggerRefresh('tap');
     return data;
   } catch (error) {
-    log.warn('decision.apply_failed', {
-      metadata: { code: (error as { code?: string })?.code ?? 'unknown' },
-    });
+    const code = (error as { code?: string })?.code;
+    log.warn('decision.apply_failed', { metadata: { code: code ?? 'unknown' } });
     throw new AppError({
-      category: 'data',
+      ...errorFacetsFor(code),
       code: 'DECISION_WRITE_FAILED',
       userMessage: "Cashflow couldn't save that rule.",
       technicalMessage: (error as { message?: string })?.message ?? 'applyDecision failed',
-      retryable: true,
       cause: error,
     });
   }
@@ -106,15 +104,13 @@ export const undoDecision = async (decisionId: string): Promise<void> => {
     log.info('decision.undone');
     triggerRefresh('tap');
   } catch (error) {
-    log.warn('decision.undo_failed', {
-      metadata: { code: (error as { code?: string })?.code ?? 'unknown' },
-    });
+    const code = (error as { code?: string })?.code;
+    log.warn('decision.undo_failed', { metadata: { code: code ?? 'unknown' } });
     throw new AppError({
-      category: 'data',
+      ...errorFacetsFor(code),
       code: 'DECISION_WRITE_FAILED',
       userMessage: "Cashflow couldn't undo that rule.",
       technicalMessage: (error as { message?: string })?.message ?? 'undoDecision failed',
-      retryable: true,
       cause: error,
     });
   }

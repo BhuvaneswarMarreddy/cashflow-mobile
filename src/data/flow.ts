@@ -1,6 +1,6 @@
 import { httpsCallable } from '@firebase/functions';
 
-import { AppError } from '@/errors';
+import { AppError, errorFacetsFor } from '@/errors';
 import { loggerFor } from '@/logging';
 import { firebaseFunctions, isFirebaseConfigured } from '@/services/firebase';
 
@@ -145,11 +145,33 @@ export const fetchFlowNode = async (
   range: FlowRange,
   key?: string,
 ): Promise<FlowNodeDetail> => {
+  if (!isFirebaseConfigured()) {
+    throw new AppError({
+      category: 'service-unavailable',
+      code: 'FIREBASE_NOT_CONFIGURED',
+      userMessage: 'Cashflow is not connected yet.',
+      technicalMessage: 'EXPO_PUBLIC_FIREBASE_* missing',
+      retryable: false,
+    });
+  }
+
   const callable = httpsCallable<
     { nodeId: string; range: FlowRange; key?: string },
     FlowNodeDetail
   >(firebaseFunctions(), 'flowNodeDetail');
-  const { data } = await callable(key ? { nodeId, range, key } : { nodeId, range });
-  log.info('flow.node_opened', { metadata: { rows: data.rows.length, folded: data.folded } });
-  return data;
+  try {
+    const { data } = await callable(key ? { nodeId, range, key } : { nodeId, range });
+    log.info('flow.node_opened', { metadata: { rows: data.rows.length, folded: data.folded } });
+    return data;
+  } catch (error) {
+    const code = (error as { code?: string })?.code;
+    log.warn('flow.node_fetch_failed', { metadata: { code: code ?? 'unknown' } });
+    throw new AppError({
+      ...errorFacetsFor(code),
+      code: 'FLOW_NODE_FETCH_FAILED',
+      userMessage: "Cashflow couldn't load that detail.",
+      technicalMessage: (error as { message?: string })?.message ?? 'flowNodeDetail failed',
+      cause: error,
+    });
+  }
 };

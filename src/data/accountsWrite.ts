@@ -1,6 +1,6 @@
 import { collection, doc, serverTimestamp, setDoc } from '@firebase/firestore';
 
-import { AppError } from '@/errors';
+import { AppError, errorFacetsFor } from '@/errors';
 import {
   CATEGORIES,
   resolveCategories,
@@ -147,15 +147,13 @@ export const createAccount = async (input: NewAccount, sortIndex: number): Promi
     });
     return ref.id;
   } catch (error) {
-    log.warn('account.create_failed', {
-      metadata: { code: (error as { code?: string })?.code ?? 'unknown' },
-    });
+    const code = (error as { code?: string })?.code;
+    log.warn('account.create_failed', { metadata: { code: code ?? 'unknown' } });
     throw new AppError({
-      category: 'data',
+      ...errorFacetsFor(code),
       code: 'ACCOUNT_CREATE_FAILED',
       userMessage: "Cashflow couldn't save that account.",
       technicalMessage: (error as { message?: string })?.message ?? 'setDoc failed',
-      retryable: true,
       cause: error,
     });
   }
@@ -193,15 +191,13 @@ export const setIncludePending = async (include: boolean): Promise<void> => {
     );
     log.info('settings.pending_policy_changed', { metadata: { include } });
   } catch (error) {
-    log.warn('settings.pending_policy_failed', {
-      metadata: { code: (error as { code?: string })?.code ?? 'unknown' },
-    });
+    const code = (error as { code?: string })?.code;
+    log.warn('settings.pending_policy_failed', { metadata: { code: code ?? 'unknown' } });
     throw new AppError({
-      category: 'data',
+      ...errorFacetsFor(code),
       code: 'PENDING_POLICY_WRITE_FAILED',
       userMessage: "Cashflow couldn't save that setting.",
       technicalMessage: (error as { message?: string })?.message ?? 'setDoc failed',
-      retryable: true,
       cause: error,
     });
   }
@@ -244,15 +240,13 @@ export const setAssumedMonthlySpend = async (dollars: number | null): Promise<vo
     log.info('settings.assumed_monthly_spend_changed', { metadata: { set: dollars !== null } });
     triggerRefresh('tap');
   } catch (error) {
-    log.warn('settings.assumed_monthly_spend_failed', {
-      metadata: { code: (error as { code?: string })?.code ?? 'unknown' },
-    });
+    const code = (error as { code?: string })?.code;
+    log.warn('settings.assumed_monthly_spend_failed', { metadata: { code: code ?? 'unknown' } });
     throw new AppError({
-      category: 'data',
+      ...errorFacetsFor(code),
       code: 'ASSUMED_SPEND_WRITE_FAILED',
       userMessage: "Cashflow couldn't save that assumption.",
       technicalMessage: (error as { message?: string })?.message ?? 'setDoc failed',
-      retryable: true,
       cause: error,
     });
   }
@@ -370,15 +364,13 @@ export const createBill = async (input: NewBill): Promise<string> => {
     triggerRefresh('tap');
     return ref.id;
   } catch (error) {
-    log.warn('bill.create_failed', {
-      metadata: { code: (error as { code?: string })?.code ?? 'unknown' },
-    });
+    const code = (error as { code?: string })?.code;
+    log.warn('bill.create_failed', { metadata: { code: code ?? 'unknown' } });
     throw new AppError({
-      category: 'data',
+      ...errorFacetsFor(code),
       code: 'BILL_CREATE_FAILED',
       userMessage: "Cashflow couldn't save that bill.",
       technicalMessage: (error as { message?: string })?.message ?? 'setDoc failed',
-      retryable: true,
       cause: error,
     });
   }
@@ -474,11 +466,10 @@ const writeCategories = async (uid: string, next: RawCustomCategory[]): Promise<
 
 const throwCategoryWriteFailed = (error: unknown): never => {
   throw new AppError({
-    category: 'data',
+    ...errorFacetsFor((error as { code?: string })?.code),
     code: 'CATEGORY_WRITE_FAILED',
     userMessage: "Cashflow couldn't save that category.",
     technicalMessage: (error as { message?: string })?.message ?? 'setDoc failed',
-    retryable: true,
     cause: error,
   });
 };

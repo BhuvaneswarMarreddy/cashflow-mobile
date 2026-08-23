@@ -670,6 +670,34 @@ describe('ChatSheet', () => {
       const scrollStyle = StyleSheet.flatten(getByTestId('chat-report-scroll').props.style);
       expect(scrollStyle.flexGrow).toBe(0);
     });
+
+    // Second, independent overgrow cause: even with the
+    // table scroller fixed above, BottomSheet's own OUTER vertical ScrollView
+    // (src/components/BottomSheet.tsx) never overrode flexGrow either — only
+    // flexShrink. RN's ScrollView.js gives every ScrollView (horizontal AND
+    // vertical) a default flexGrow: 1, so on a short transcript (this report
+    // is the only entry) that ScrollView still stretched to fill the sheet's
+    // ~85%-of-screen cap, leaving dead space below the report card before the
+    // input bar. Same class of bug, different node — see BottomSheet.tsx's
+    // doc comment for the full mechanics. As with the scroller-hugs-content
+    // test above, RTL proves the override is present, not the on-device
+    // geometry — that wants a device or a layout-capable renderer.
+    it('does not let the sheet body grow past a short transcript either', async () => {
+      mockSend.mockResolvedValue({
+        action: 'report',
+        title: 'Upcoming Subscriptions',
+        columns: ['Vendor', 'Amount'],
+        rows: [['A', 1], ['B', 2], ['C', 3], ['D', 4], ['E', 5]],
+      });
+      const { getByTestId } = await renderSheet();
+
+      await fireEvent.changeText(getByTestId('chat-input'), 'upcoming subscriptions');
+      await fireEvent.press(getByTestId('chat-send'));
+
+      await waitFor(() => expect(getByTestId('chat-report')).toBeTruthy());
+      const sheetScrollStyle = StyleSheet.flatten(getByTestId('bottom-sheet-scroll').props.style);
+      expect(sheetScrollStyle.flexGrow).toBe(0);
+    });
   });
 
   it('shows the AppError userMessage inline on a send failure, with a retry', async () => {

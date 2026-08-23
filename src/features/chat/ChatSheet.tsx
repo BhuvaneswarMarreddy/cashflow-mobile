@@ -857,6 +857,19 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
    * simulate real pan gestures, so the actual on-device feel still wants a
    * manual check.
    *
+   * `style={{ flexGrow: 0 }}` on that ScrollView is load-bearing, not
+   * decoration: RN's own `ScrollView.js` gives every horizontal ScrollView a
+   * default `flexGrow: 1` (its `baseHorizontal` style, composed under
+   * whatever `style` is passed) — inside `Card`'s column flexDirection that's
+   * a MAIN-axis grow, so with no override the ScrollView stretched to fill
+   * all leftover vertical space in the sheet (up to its ~85% cap) and `Card`
+   * ballooned to wrap it, leaving a huge empty bordered region below an
+   * 8-row table. `flexGrow: 0` makes it hug its own content height instead.
+   * Width is untouched — that's the CROSS axis here, still governed by
+   * `Card`'s default `alignItems: 'stretch'`, which is what lets the
+   * ScrollView's viewport span the full card width and clip/scroll wider
+   * table content.
+   *
    * Row-major layout (a `View` per row, cells inside), not column-major:
    * VoiceOver reading "Category: Groceries, Spent: 412.50" as one stop is far
    * more useful than reading down an entire column first. Alignment is
@@ -877,7 +890,12 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
       >
         <AppText variant="bodyStrong">{entry.title}</AppText>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator
+          style={{ flexGrow: 0 }}
+          testID="chat-report-scroll"
+        >
           <View>
             <View
               accessible

@@ -53,6 +53,8 @@ export const HomeScreen = () => {
   const lastRefreshedAt = useFinanceStore((state) => state.lastRefreshedAt);
   const hasLoadedOnce = useFinanceStore((state) => state.hasLoadedOnce);
   const accounts = useFinanceStore((state) => state.accounts);
+  // Distinguishes "no baseline yet" from "nothing changed" — see ChangeList.
+  const previousSnapshot = useFinanceStore((state) => state.previousSnapshot);
 
   const fabActions: FabAction[] = [
     {
@@ -62,20 +64,11 @@ export const HomeScreen = () => {
       icon: 'refresh-cw',
       onPress: () => triggerRefresh('tap'),
     },
-    {
-      key: 'record-cash',
-      label: 'Record cash',
-      // Reads as a VoiceOver hint now (FAB wires `description` to
-      // accessibilityHint) — "needs the backend" is an implementation note,
-      // not something to say to a user, so it's user-facing text here.
-      description: 'Not available yet',
-      icon: 'dollar-sign',
-      onPress: () =>
-        usageAnalytics.track('action.selected', 'home', {
-          target: 'record-cash',
-          outcome: 'cancelled',
-        }),
-    },
+    // "Record cash" lived here with an onPress that only fired analytics —
+    // a button that looked live and did nothing. Removed rather than left as a
+    // false promise: chat has no verb that can create a transaction either, so
+    // pointing it at Ask Cashflow would just be a different dead end.
+    // Real cash entry is filed as its own piece of work.
   ];
 
   const delta = (current: number | undefined, before: number | undefined): number | null =>
@@ -222,7 +215,7 @@ export const HomeScreen = () => {
 
           <View>
             <SectionHeader
-              title="Since your last refresh"
+              title={previousSnapshot ? 'Since your last refresh' : 'Recent changes'}
               {...(changes.length > 0
                 ? {
                     actionLabel: 'Activity',
@@ -230,7 +223,7 @@ export const HomeScreen = () => {
                   }
                 : {})}
             />
-            <ChangeList changes={changes} />
+            <ChangeList changes={changes} hasBaseline={previousSnapshot !== null} />
           </View>
 
           {accounts.some((account) => account.status !== 'ok') ? (

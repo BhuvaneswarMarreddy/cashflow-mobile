@@ -228,7 +228,12 @@ export const refreshFinancialData = async (
       correlationId,
       source: trigger,
     });
-    const draft = summarizeRefresh({ snapshot, changes, now: clock.now() });
+    const draft = summarizeRefresh({
+      snapshot,
+      changes,
+      now: clock.now(),
+      hasBaseline: snapshotBundle ? snapshotBundle.previous !== null : true,
+    });
     const presented = notificationService.present(draft, { source: 'refresh', correlationId });
     summaryStage.succeeded({ kind: draft.category, delivered: presented !== null });
   }

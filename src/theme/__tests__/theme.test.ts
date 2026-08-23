@@ -76,3 +76,52 @@ describe('colour tokens', () => {
     expect(colorsFor('light').warning).toBe(colorsFor('light').accent);
   });
 });
+
+/**
+ * Depth on ink is an edge, not a shadow. Before this, `shadowFor` returned the
+ * same hairline for every level, so `elevation(2)` and `elevation(3)` were
+ * pixel-identical and nothing in dark mode could look more raised than
+ * anything else — the FAB's fan of actions read as flat against the scrim.
+ */
+describe('dark elevation', () => {
+  const dark = createTheme('dark');
+
+  it('actually scales with level', () => {
+    const one = dark.elevation(1);
+    const two = dark.elevation(2);
+    const three = dark.elevation(3);
+
+    expect(one).not.toEqual(two);
+    expect(two).not.toEqual(three);
+    expect(three.borderWidth).toBeGreaterThan(two.borderWidth as number);
+  });
+
+  it('leaves level 0 flat', () => {
+    expect(dark.elevation(0)).toEqual({});
+  });
+
+  /**
+   * A 60% black scrim composites `background` down to ~#060608. `borderStrong`
+   * is the only thing giving the FAB's actions a boundary there, so it has to
+   * clear the 3:1 WCAG 1.4.11 floor against that composite — 1.42:1 was the
+   * measured cause of "the FAB blends into the background".
+   */
+  it('keeps borderStrong above the 3:1 boundary floor on the scrim plane', () => {
+    const channel = (c: number) => {
+      const s = c / 255;
+      return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+    };
+    const luminance = (hex: string) => {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+      return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+    };
+    const ratio = (a: string, b: string) => {
+      const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+      return (hi + 0.05) / (lo + 0.05);
+    };
+
+    // background #101014 under rgba(0,0,0,0.6)
+    const scrim = '#060608';
+    expect(ratio(colorsFor('dark').borderStrong, scrim)).toBeGreaterThanOrEqual(3);
+  });
+});

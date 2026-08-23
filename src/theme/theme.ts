@@ -40,7 +40,15 @@ export interface Theme {
 const shadowFor = (scheme: ColorScheme, level: ElevationLevel, colors: ThemeColors): ViewStyle => {
   if (level === 0) return {};
   if (scheme === 'dark') {
-    return { borderWidth: borderWidth.hairline, borderColor: colors.border };
+    // Depth on ink is a lighter edge rather than a shadow, so the edge has to
+    // scale with `level` the way the shadow does on paper. Returning one
+    // hairline for every level made elevation(2) and elevation(3) pixel
+    // identical — nothing in dark mode could look more raised than anything
+    // else, which is why the FAB's fan of actions read as flat against the
+    // scrim while its gold toggle appeared to "pop" purely from its fill.
+    if (level === 1) return { borderWidth: borderWidth.hairline, borderColor: colors.border };
+    if (level === 2) return { borderWidth: borderWidth.hairline, borderColor: colors.borderStrong };
+    return { borderWidth: borderWidth.thick, borderColor: colors.borderStrong };
   }
   const depth = { 1: 2, 2: 6, 3: 14 }[level];
   return Platform.select<ViewStyle>({

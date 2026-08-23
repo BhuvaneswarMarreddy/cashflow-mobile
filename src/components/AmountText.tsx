@@ -11,7 +11,7 @@ interface Props {
   cents: number;
   variant?: Extract<
     TypographyVariant,
-    'amount' | 'amountSmall' | 'body' | 'bodyStrong' | 'caption'
+    'heroNumber' | 'amount' | 'amountSmall' | 'body' | 'bodyStrong' | 'caption'
   >;
   /** `auto` colours by sign. `neutral` is right for balances, where a large
    * number is not inherently good or bad. */

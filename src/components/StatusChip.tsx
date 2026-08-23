@@ -50,7 +50,7 @@ export const StatusChip = ({ label, tone = 'neutral', icon }: Props) => {
         alignSelf: 'flex-start',
         paddingHorizontal: theme.spacing.sm,
         paddingVertical: theme.spacing.xs,
-        borderRadius: theme.radius.control,
+        borderRadius: theme.radius.pill,
         backgroundColor: theme.colors[SURFACE[tone]],
       }}
     >

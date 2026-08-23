@@ -198,6 +198,8 @@ export const FAB = ({ actions, source, icon = 'plus', label }: Props) => {
                   borderRadius: theme.radius.pill,
                   paddingHorizontal: theme.spacing.md,
                   paddingVertical: theme.spacing.xs,
+                  borderWidth: theme.borderWidth.hairline,
+                  borderColor: theme.colors.borderStrong,
                   ...theme.elevation(2),
                 }}
               >
@@ -219,7 +221,7 @@ export const FAB = ({ actions, source, icon = 'plus', label }: Props) => {
                   justifyContent: 'center',
                   backgroundColor: theme.colors.surface,
                   borderWidth: theme.borderWidth.hairline,
-                  borderColor: theme.colors.border,
+                  borderColor: theme.colors.borderStrong,
                   opacity: pressed ? theme.opacity.pressed : 1,
                   ...theme.elevation(2),
                 })}

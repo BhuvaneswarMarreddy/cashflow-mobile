@@ -1,4 +1,4 @@
-import { AppError, categoryForStatus, isAppError, normalizeError } from '../AppError';
+import { AppError, categoryForStatus, errorFacetsFor, isAppError, normalizeError } from '../AppError';
 
 describe('AppError', () => {
   it('supplies a calm user message per category', () => {
@@ -64,6 +64,39 @@ describe('normalizeError', () => {
 
   it('handles a thrown non-error object', () => {
     expect(normalizeError({ weird: true }).technicalMessage).toBe('Non-error value thrown');
+  });
+});
+
+describe('errorFacetsFor', () => {
+  it.each([
+    // [raw code as the SDK actually hands it, expected category, expected retryable]
+    ['functions/invalid-argument', 'validation', false],
+    ['invalid-argument', 'validation', false], // Firestore never prefixes
+    ['functions/not-found', 'data', false],
+    ['not-found', 'data', false],
+    ['functions/unauthenticated', 'authentication', false],
+    ['functions/resource-exhausted', 'service-unavailable', false],
+    ['functions/unavailable', 'service-unavailable', false],
+    ['functions/internal', 'data', true],
+    ['permission-denied', 'data', true],
+  ] as const)('maps %s to category %s, retryable %s', (code, category, retryable) => {
+    expect(errorFacetsFor(code)).toEqual({ category, retryable });
+  });
+
+  it('defaults an undefined code to the retryable data facet', () => {
+    expect(errorFacetsFor(undefined)).toEqual({ category: 'data', retryable: true });
+  });
+
+  it('never matches on a bare code that only a Callable prefix would produce for a Callable error', () => {
+    // The whole point of the HIGH finding: `resource-exhausted` alone is not
+    // what `@firebase/functions` ever hands back — only `functions/resource-exhausted`
+    // is. Both forms are accepted here (Firestore vs Callable transport), but
+    // this pins that a Callable-style prefixed code resolves correctly rather
+    // than silently falling through to the generic default.
+    expect(errorFacetsFor('functions/resource-exhausted')).not.toEqual({
+      category: 'data',
+      retryable: true,
+    });
   });
 });
 

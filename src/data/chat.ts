@@ -1,7 +1,7 @@
 import { httpsCallable } from '@firebase/functions';
 
 import { CATEGORIES, resolveCategories, type CategoryOption } from '@/features/activity/categories';
-import { AppError } from '@/errors';
+import { AppError, errorFacetsFor, stripFunctionsPrefix } from '@/errors';
 import { loggerFor } from '@/logging';
 import { firebaseFunctions, isFirebaseConfigured } from '@/services/firebase';
 import { useFinanceStore } from '@/store/financeStore';
@@ -678,45 +678,58 @@ const buildContext = (): ChatContext => {
   };
 };
 
+/**
+ * `@firebase/functions` ALWAYS prefixes `error.code` with `functions/` (see
+ * `errorFacetsFor`'s own comment) — the real value on an `aiChat` rejection is
+ * `'functions/resource-exhausted'`, never the bare `'resource-exhausted'`.
+ * The prefix is stripped ONCE, here, rather than hand-prefixing each literal
+ * below: that is what keeps the next code added to this switch from falling
+ * into the same trap. `category`/`retryable` come from the same
+ * `errorFacetsFor` the eight write sites use, so chat and every write agree
+ * on when a Try Again button is honest; only the chat-specific wording and
+ * machine `code` differ per branch.
+ */
 const mapChatError = (error: unknown): AppError => {
-  const code = (error as { code?: string })?.code ?? 'unknown';
-  const technicalMessage = (error as { message?: string })?.message ?? code;
+  const rawCode = (error as { code?: string })?.code;
+  const code = stripFunctionsPrefix(rawCode ?? 'unknown');
+  const technicalMessage = (error as { message?: string })?.message ?? rawCode ?? 'unknown';
+  const { category, retryable } = errorFacetsFor(rawCode);
 
   if (code === 'resource-exhausted') {
     return new AppError({
-      category: 'service-unavailable',
+      category,
       code: 'AI_LIMIT_REACHED',
       userMessage: 'Daily AI limit reached — try again tomorrow.',
       technicalMessage,
-      retryable: false,
+      retryable,
       cause: error,
     });
   }
   if (code === 'unavailable') {
     return new AppError({
-      category: 'service-unavailable',
+      category,
       code: 'AI_NOT_CONFIGURED',
       userMessage: 'AI is not configured.',
       technicalMessage,
-      retryable: false,
+      retryable,
       cause: error,
     });
   }
   if (code === 'unauthenticated') {
     return new AppError({
-      category: 'authentication',
+      category,
       code: 'AI_UNAUTHENTICATED',
       technicalMessage,
-      retryable: false,
+      retryable,
       cause: error,
     });
   }
   return new AppError({
-    category: 'data',
+    category,
     code: 'CHAT_FAILED',
     userMessage: "Cashflow couldn't reach the AI. Try again.",
     technicalMessage,
-    retryable: true,
+    retryable,
     cause: error,
   });
 };

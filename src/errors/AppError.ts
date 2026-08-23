@@ -152,3 +152,47 @@ export const categoryForStatus = (status: number): ErrorCategory => {
   if (status >= 500) return 'service-unavailable';
   return 'unexpected';
 };
+
+/**
+ * Firebase Cloud Functions callables ALWAYS prefix their error code with
+ * `functions/` (`@firebase/functions`: `super(\`${FUNCTIONS_TYPE}/${code}\`, ...)`)
+ * — `error.code` on an `aiChat`/`applyDecision`/etc. rejection is
+ * `'functions/resource-exhausted'`, never the bare `'resource-exhausted'`.
+ * Firestore's own `FirestoreError` never carries a prefix. Stripping it once,
+ * here, means every caller below compares the same bare, standard code
+ * regardless of which transport produced it — a bare-string comparison
+ * against a Callable code can never match and silently dead-code the branch.
+ */
+const stripFunctionsPrefix = (code: string): string => code.replace(/^functions\//, '');
+
+export interface ErrorFacets {
+  category: ErrorCategory;
+  retryable: boolean;
+}
+
+/**
+ * Maps a raw Firebase error code (Callable or Firestore, prefixed or not) to
+ * the category/retryable pair every write site — and the chat mapper — should
+ * agree on. The single place that answers "is retrying this exact request
+ * worth offering": `invalid-argument` (a malformed request) and `not-found`
+ * (the thing is already gone) never are, no matter how many times the
+ * identical request is replayed. Anything unrecognised keeps today's generic
+ * "might be transient" default.
+ */
+export const errorFacetsFor = (code: string | undefined): ErrorFacets => {
+  switch (stripFunctionsPrefix(code ?? '')) {
+    case 'invalid-argument':
+      return { category: 'validation', retryable: false };
+    case 'not-found':
+      return { category: 'data', retryable: false };
+    case 'unauthenticated':
+      return { category: 'authentication', retryable: false };
+    case 'resource-exhausted':
+    case 'unavailable':
+      return { category: 'service-unavailable', retryable: false };
+    default:
+      return { category: 'data', retryable: true };
+  }
+};
+
+export { stripFunctionsPrefix };

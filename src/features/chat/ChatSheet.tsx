@@ -1024,7 +1024,7 @@ export const ChatSheet = ({ visible, onClose }: Props) => {
           backgroundColor: theme.colors.surfaceAlt,
           borderRadius: theme.radius.control,
           borderWidth: theme.borderWidth.hairline,
-          borderColor: theme.colors.border,
+          borderColor: theme.colors.borderStrong,
           paddingHorizontal: theme.spacing.xs,
           paddingVertical: theme.spacing.xs,
         }}

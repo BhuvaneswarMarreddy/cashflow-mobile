@@ -120,7 +120,7 @@ export const AccountsScreen = () => {
             <AppText variant="sectionHeading" tone="textTertiary">
               Net worth
             </AppText>
-            <AmountText cents={netWorth(accounts)} variant="amount" tone="neutral" />
+            <AmountText cents={netWorth(accounts)} variant="heroNumber" tone="neutral" />
             <View style={{ marginTop: theme.spacing.xs }}>
               <LastUpdated
                 at={lastRefreshedAt}

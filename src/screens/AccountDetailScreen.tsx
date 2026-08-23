@@ -80,7 +80,7 @@ export const AccountDetailScreen = () => {
             <AppText variant="sectionHeading" tone="textTertiary">
               {owed ? 'Balance owed' : 'Current balance'}
             </AppText>
-            <AmountText cents={account.balanceCents} variant="amount" tone="neutral" precise />
+            <AmountText cents={account.balanceCents} variant="heroNumber" tone="neutral" precise />
             <AppText variant="secondary" tone="textSecondary">
               {account.institution} · {accountKindLabel[account.kind]} · {formatMask(account.mask)}
             </AppText>

@@ -52,7 +52,17 @@ const txn = (partial: Partial<Transaction> & { id: string }): Transaction => ({
 beforeEach(() => {
   jest.clearAllMocks();
   mockIsFirebaseConfigured.mockReturnValue(true);
-  useFinanceStore.setState({ accounts: [], transactions: [], bills: [], upcoming: [], categories: [] });
+  // hasLoadedOnce: true — every existing test below models a store that has already
+  // completed its first refresh (the ordinary case). The "unloaded" case gets its own
+  // dedicated tests, right after the `sendChatTurn` describe block starts.
+  useFinanceStore.setState({
+    accounts: [],
+    transactions: [],
+    bills: [],
+    upcoming: [],
+    categories: [],
+    hasLoadedOnce: true,
+  });
 });
 
 describe('parseChatAction', () => {
@@ -1109,6 +1119,45 @@ describe('sendChatTurn', () => {
     expect(sent.context.upcoming).toEqual([
       { name: 'City Utilities', dueDate: '2026-08-25', amount: 87.4 },
     ]);
+  });
+
+  /**
+   * The device-reported gap: the owner asked "are there values in upcoming" right after
+   * the chat itself had just recorded a bill, and got "I can't see upcoming payments on
+   * this client" — the ABSENT wording, which should only ever fire when this client
+   * genuinely never computed the section. `createBill` (accountsWrite.ts) writes straight
+   * to Firestore and never updates `financeStore`, so a fresh/never-refreshed store has
+   * `bills`/`upcoming` sitting at their `[]` defaults — indistinguishable, before this fix,
+   * from "loaded, and genuinely nothing". Omitting the keys until `hasLoadedOnce` is true
+   * is what lets the server's ABSENT-vs-EMPTY gate (functions/src/prompts.ts) tell the two
+   * states apart honestly instead of reporting a confident, false "(none)".
+   */
+  it('omits bills and upcoming entirely — not `[]` — before the store has ever loaded', async () => {
+    useFinanceStore.setState({ accounts: [], transactions: [], bills: [], upcoming: [], hasLoadedOnce: false });
+    const callable = jest
+      .fn()
+      .mockResolvedValue({ data: { success: true, result: { action: 'answer', explanation: 'ok' } } });
+    mockHttpsCallable.mockReturnValue(callable);
+
+    await sendChatTurn({ message: 'is there anything in upcoming?', history: [] });
+
+    const sent = callable.mock.calls[0][0];
+    expect(sent.context).not.toHaveProperty('bills');
+    expect(sent.context).not.toHaveProperty('upcoming');
+  });
+
+  it('sends real `[]` for bills/upcoming once the store has loaded, distinguishing "genuinely none" from "not yet loaded"', async () => {
+    useFinanceStore.setState({ accounts: [], transactions: [], bills: [], upcoming: [], hasLoadedOnce: true });
+    const callable = jest
+      .fn()
+      .mockResolvedValue({ data: { success: true, result: { action: 'answer', explanation: 'ok' } } });
+    mockHttpsCallable.mockReturnValue(callable);
+
+    await sendChatTurn({ message: 'is there anything in upcoming?', history: [] });
+
+    const sent = callable.mock.calls[0][0];
+    expect(sent.context.bills).toEqual([]);
+    expect(sent.context.upcoming).toEqual([]);
   });
 
   it('caps bills and upcoming at 30, taking the front of each array', async () => {

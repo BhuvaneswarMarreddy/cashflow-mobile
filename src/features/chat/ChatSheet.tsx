@@ -252,7 +252,7 @@ const describeBillDetails = (entry: Extract<Entry, { kind: 'bill-proposal' }>): 
 };
 
 const describeBillApplied = (entry: Extract<Entry, { kind: 'bill-proposal' }>): string =>
-  `Saved — ${entry.vendor} now shows in Upcoming and Bills, ${billAmount(entry.amountCents)} ` +
+  `Saved — ${entry.vendor} now shows in Bills, ${billAmount(entry.amountCents)} ` +
   `${entry.frequency}. Edit it from the web app's Bills tab.`;
 
 const bubble = (theme: Theme, key: string, text: string, align: 'flex-end' | 'flex-start') => (

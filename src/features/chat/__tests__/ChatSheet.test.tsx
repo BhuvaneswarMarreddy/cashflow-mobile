@@ -325,7 +325,7 @@ describe('ChatSheet', () => {
     await waitFor(() =>
       expect(
         getByText(
-          "Saved — Apple Card now shows in Upcoming and Bills, $45.79 monthly. Edit it from the web app's Bills tab.",
+          "Saved — Apple Card now shows in Bills, $45.79 monthly. Edit it from the web app's Bills tab.",
         ),
       ).toBeTruthy(),
     );

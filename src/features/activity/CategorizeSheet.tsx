@@ -192,7 +192,17 @@ export const CategorizeSheet = ({ transaction, onClose }: Props) => {
             </View>
           ) : null}
           {categories.map((category, index) => {
-            const isCurrent = category.value === transaction.category;
+            // The wire `category` is the server's `sourceCategory ?? category` — the
+              // provider's LABEL ("Food & Dining"), not a slug. Comparing it to
+              // `category.value` ("food") was never true, so the checkmark was
+              // unreachable by construction — and stayed unreachable after
+              // categorizing, since the rule writes the label into sourceCategory.
+              // The cost was not cosmetic: with no "already filed here" mark you
+              // re-tap, and `applyMerchantRule` writes a duplicate rule that
+              // truthfully reports "0 transactions re-tallied across 0 months".
+              const isCurrent =
+                category.value === transaction.category ||
+                category.label === transaction.category;
             return (
               <View key={category.value}>
                 {index > 0 ? <Divider inset={theme.spacing.lg} /> : null}

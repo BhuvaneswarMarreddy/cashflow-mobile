@@ -84,6 +84,44 @@ const todayIso = (now = new Date()): string => {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 };
 
+/**
+ * When an installment plan runs out. Ported VERBATIM from cashflow-forecast's
+ * `installmentEndFrom` (`src/lib/bills.ts`) — that is the source of truth, and
+ * the two must agree or one client's bills expire on a different date than the
+ * other's. Same precedent as `slugForCategoryLabel` in features/activity.
+ *
+ * Stamped at WRITE time on purpose. Deriving it at read time from `updatedAt`
+ * ratchets: every unrelated edit re-anchors the plan, and because
+ * `installmentsRemaining` never decrements, each edit re-adds the FULL original
+ * term — silently inflating Home's "Locked" tile (cashflow-forecast#165).
+ */
+const MONTH_STEP: Partial<Record<BillFrequency, number>> = {
+  monthly: 1,
+  quarterly: 3,
+  semiannual: 6,
+  annual: 12,
+};
+
+const installmentEndFrom = (
+  anchorISO: string,
+  frequency: BillFrequency,
+  count: number,
+): string | undefined => {
+  if (typeof count !== 'number' || !anchorISO) return undefined;
+  // Date-only, so the phone and the UTC callable can never derive ends a day
+  // apart: a plain calendar date parses to local midnight in every zone.
+  const [y, m, d] = anchorISO.slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return undefined;
+  const from = new Date(y, m - 1, d);
+  if (Number.isNaN(from.getTime())) return undefined;
+  const months = MONTH_STEP[frequency];
+  const end = new Date(from);
+  if (months !== undefined) end.setMonth(end.getMonth() + months * count);
+  else end.setDate(end.getDate() + (frequency === 'weekly' ? 7 : 14) * count);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`;
+};
+
 /** The document body, separated from the write so it can be tested directly. */
 export const accountDocument = (
   input: NewAccount,
@@ -316,7 +354,21 @@ export const billDocument = (input: NewBill, paymentMethodId: string): Record<st
   lifecycleStatus: 'active',
   ...(input.autopayDay != null ? { autopayDay: input.autopayDay } : {}),
   ...(input.anchorDate ? { anchorDate: input.anchorDate } : {}),
-  ...(input.endDate ? { endDate: input.endDate } : {}),
+  // An explicit endDate always wins — record_bill sends at most one of the two,
+  // and a caller naming a real end date means it. Otherwise stamp the plan's
+  // end now, so later edits cannot move it.
+  ...(input.endDate
+    ? { endDate: input.endDate }
+    : input.installmentsRemaining != null
+      ? (() => {
+          const end = installmentEndFrom(
+            new Date().toISOString(),
+            input.frequency,
+            input.installmentsRemaining,
+          );
+          return end ? { endDate: end } : {};
+        })()
+      : {}),
   ...(input.installmentsRemaining != null ? { installmentsRemaining: input.installmentsRemaining } : {}),
   ...(input.nonNegotiable != null ? { nonNegotiable: input.nonNegotiable } : {}),
 });

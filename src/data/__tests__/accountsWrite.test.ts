@@ -713,3 +713,52 @@ describe('renameCategory', () => {
     expect(mockTriggerRefresh).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * cashflow-forecast#165. The plan's end used to be derived at READ time from
+ * `updatedAt`, so every unrelated edit re-anchored it — and because
+ * `installmentsRemaining` never decrements, each edit re-added the FULL
+ * original term, silently inflating Home's "Locked" tile. `update_bill`'s own
+ * worked example is a rename, so that was the normal path.
+ *
+ * Stamping the end once, at write time, is what makes it immune.
+ */
+describe('billDocument stamps an installment plan end', () => {
+  const installment: NewBill = {
+    vendor: 'Apple Card',
+    amountCents: 4_579,
+    frequency: 'monthly',
+    installmentsRemaining: 13,
+  };
+
+  it('writes an endDate derived from the count', () => {
+    jest.useFakeTimers().setSystemTime(Date.parse('2026-08-06T12:00:00.000Z'));
+    try {
+      expect(billDocument(installment, 'manual').endDate).toBe('2027-09-06');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('never overrides an endDate the caller supplied', () => {
+    const doc = billDocument({ ...installment, endDate: '2026-12-01' }, 'manual');
+    expect(doc.endDate).toBe('2026-12-01');
+  });
+
+  it('writes no endDate for a bill with no installment count', () => {
+    const doc = billDocument({ vendor: 'Rent', amountCents: 185_000, frequency: 'monthly' }, 'manual');
+    expect('endDate' in doc).toBe(false);
+  });
+
+  it('agrees with the forecast repo on weekly and biweekly steps', () => {
+    jest.useFakeTimers().setSystemTime(Date.parse('2026-08-06T12:00:00.000Z'));
+    try {
+      expect(billDocument({ ...installment, frequency: 'weekly', installmentsRemaining: 4 }, 'manual').endDate)
+        .toBe('2026-09-03');
+      expect(billDocument({ ...installment, frequency: 'biweekly', installmentsRemaining: 4 }, 'manual').endDate)
+        .toBe('2026-10-01');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});

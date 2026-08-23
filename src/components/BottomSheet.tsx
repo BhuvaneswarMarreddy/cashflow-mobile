@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode, type RefObject } from 'react';
 import {
   Animated,
   Easing,
@@ -26,6 +26,8 @@ interface Props {
   children: ReactNode;
   /** Pinned below the scrolling body, e.g. a chat input row — never scrolls away. */
   footer?: ReactNode;
+  /** Lets a consumer (e.g. a chat transcript) call `.scrollToEnd()` on the body. */
+  scrollRef?: RefObject<ScrollView | null>;
 }
 
 /** Drag further than this and releasing dismisses instead of springing back. */
@@ -55,7 +57,7 @@ const DISMISS_AFTER = 110;
  *     footer instead of the sheet hugging short content. See the ScrollView
  *     below for the full story.
  */
-export const BottomSheet = ({ visible, onClose, title, children, footer }: Props) => {
+export const BottomSheet = ({ visible, onClose, title, children, footer, scrollRef }: Props) => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
@@ -191,6 +193,7 @@ export const BottomSheet = ({ visible, onClose, title, children, footer }: Props
           </View>
 
           <ScrollView
+            ref={scrollRef}
             testID="bottom-sheet-scroll"
             // flexShrink lets the body give way to the cap; without it the
             // ScrollView keeps its full content height and the cap does

@@ -737,6 +737,14 @@ describe('ChatSheet', () => {
     expect(getByTestId('chat-send').props.accessibilityState.disabled).toBe(true);
   });
 
+  it('Send becomes enabled once there is text', async () => {
+    const { getByTestId } = await renderSheet();
+
+    await fireEvent.changeText(getByTestId('chat-input'), 'How much on coffee?');
+
+    expect(getByTestId('chat-send').props.accessibilityState.disabled).toBe(false);
+  });
+
   it('does not send on an empty/whitespace-only message', async () => {
     const { getByTestId } = await renderSheet();
 
@@ -744,6 +752,49 @@ describe('ChatSheet', () => {
     await fireEvent.press(getByTestId('chat-send'));
 
     expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  // A chat composer, not a form field: the input grows with content and the
+  // return key inserts a newline — sending only ever happens via the button.
+  describe('composer: multiline growth, not a submit-on-return field', () => {
+    it('the input is multiline, grows within a capped height, and never auto-submits on return', async () => {
+      const { getByTestId } = await renderSheet();
+      const input = getByTestId('chat-input');
+
+      expect(input.props.multiline).toBe(true);
+      // blurOnSubmit: false — the return key must not dismiss/submit a
+      // multiline field; it's what keeps "return inserts a newline" true on
+      // both platforms rather than depending on OS default behaviour.
+      expect(input.props.blurOnSubmit).toBe(false);
+      // No onSubmitEditing wired at all: even if something fired a submit
+      // event, there is nothing here that could turn it into a send.
+      expect(input.props.onSubmitEditing).toBeUndefined();
+      // Starts at one line's worth of height (a11y floor, not a taller
+      // "comfortable" default) and caps well short of taking over the sheet.
+      expect(input.props.style.minHeight).toBe(44);
+      expect(input.props.style.maxHeight).toBeGreaterThan(input.props.style.minHeight);
+      expect(input.props.style.maxHeight).toBeLessThan(200);
+    });
+
+    it('typing a newline into the message does not send it — only the button does', async () => {
+      const { getByTestId } = await renderSheet();
+
+      await fireEvent.changeText(getByTestId('chat-input'), 'line one\nline two');
+
+      expect(mockSend).not.toHaveBeenCalled();
+      expect(getByTestId('chat-send').props.accessibilityState.disabled).toBe(false);
+
+      await fireEvent.press(getByTestId('chat-send'));
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      expect(mockSend.mock.calls[0][0].message).toBe('line one\nline two');
+    });
+
+    it('the composer row anchors attach/send to the top of the row (the first line), not the vertical center', async () => {
+      const { getByTestId } = await renderSheet();
+      // The row is the parent View wrapping both icon buttons and the input.
+      const row = getByTestId('chat-input').parent;
+      expect(row?.props.style.alignItems).toBe('flex-start');
+    });
   });
 
   it('an oversized picked image is not attached — shows a notice instead', async () => {

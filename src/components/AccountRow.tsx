@@ -1,7 +1,7 @@
 import { View } from 'react-native';
 
 import type { Account, AccountKind } from '@/types';
-import { formatCurrency, formatMask, formatRelativeTime } from '@/utils/format';
+import { formatCurrency, formatMask } from '@/utils/format';
 import { isLiability } from '@/utils/money';
 
 import { AmountText } from './AmountText';
@@ -41,7 +41,14 @@ export const AccountRow = ({ account, onPress }: Props) => {
     account.status === 'error'
       ? "Couldn't sync"
       : account.status === 'stale'
-        ? `Updated ${formatRelativeTime(account.lastSyncedAt)}`
+        // NOT a sync claim. The server sets this status from `isUnanchored`
+        // alone (functions/src/snapshot.ts) and always sends
+        // `lastSyncedAt: null`, because no per-account sync stamp exists —
+        // so this read "Updated never" on an account Plaid may have refreshed
+        // sixty seconds ago. What is actually unknown is the BALANCE: without
+        // an opening anchor it is net movement over the rows on record, not a
+        // figure any bank confirmed.
+        ? 'Balance not confirmed by the bank'
         : null;
 
   return (

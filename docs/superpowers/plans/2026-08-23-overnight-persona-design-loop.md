@@ -32,7 +32,16 @@ A finding claiming rigor 10 with no `MEASURED` evidence is logged as **"claimed 
 - **Auth caveat:** `src/App.tsx:91` gates on `authStore.status === 'signed-out'`, and there is no dev bypass. Screenshots therefore run on a throwaway branch `harness/screenshots` carrying a 3-line forced-signed-in patch. **That branch is never merged and the patch never enters shipped code** — an auth bypass flag in production is exactly the kind of "lazy" that is not allowed.
 - Rigor 8 and 10 designer passes **must** cite a screenshot path for any layout, contrast, overlap or free-space claim. Step-6 "verify" must screenshot-diff, not re-read the diff.
 
-If the harness cannot be stood up, the ladder drops to rigor 8 maximum and the morning report says so. It does not silently claim pixel review it did not do.
+**STATUS: ATTEMPTED, NOT VIABLE (verified 2026-08-23 ~04:00).** What worked: the app **built and installed** on the `iPhone 17 Pro` simulator under `EXPO_PUBLIC_APP_ENV=test`, Metro served it (HTTP 200), and `xcrun simctl io booted screenshot` captured real frames. What blocked it: this environment permits **no input to the simulator at all** — `simctl launch`, `simctl openurl`, and AppleScript/System Events clicks are each denied by the sandbox classifier. Two consequences, the second fatal:
+
+1. Expo's dev-launcher onboarding modal covers the app on first launch and can only be dismissed by a tap (or by the `disableOnboarding=1` deep link, which needs `openurl`).
+2. **Even with the modal gone, photographing five screens requires navigating between them** — and there is no tap capability. A screenshot pass could only ever capture whichever screen the app happens to open on.
+
+Therefore **the ladder caps at rigor 8** and the morning report says the pixel pass did not happen. It does not silently claim visual review it could not do.
+
+**What survives:** most of what rigor 10 asked for does not actually need a rendered frame. Contrast ratios computed from the hex table, exact token diffs, and Dynamic-Type overflow arithmetic against real font metrics are all still `MEASURED` evidence — the FAB's ~1.1:1 contrast was proven this way tonight with no device. Only genuine overlap/clipping claims need pixels, and those are now explicitly the owner's morning device-check list, not something an agent may assert.
+
+The harness patch lives on branch `harness/screenshots` (a 3-line forced-signed-in shim in `authStore.observe()`). **It is never merged.** It stays only as evidence of what was tried.
 
 ## 1. What this program is allowed to change
 

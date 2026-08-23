@@ -198,6 +198,8 @@ export const FAB = ({ actions, source, icon = 'plus', label }: Props) => {
                   borderRadius: theme.radius.pill,
                   paddingHorizontal: theme.spacing.md,
                   paddingVertical: theme.spacing.xs,
+                  borderWidth: theme.borderWidth.hairline,
+                  borderColor: theme.colors.borderStrong,
                   ...theme.elevation(2),
                 }}
               >
@@ -219,7 +221,7 @@ export const FAB = ({ actions, source, icon = 'plus', label }: Props) => {
                   justifyContent: 'center',
                   backgroundColor: theme.colors.surface,
                   borderWidth: theme.borderWidth.hairline,
-                  borderColor: theme.colors.border,
+                  borderColor: theme.colors.borderStrong,
                   opacity: pressed ? theme.opacity.pressed : 1,
                   ...theme.elevation(2),
                 })}
@@ -248,6 +250,11 @@ export const FAB = ({ actions, source, icon = 'plus', label }: Props) => {
             backgroundColor: theme.colors.accent,
             opacity: pressed ? theme.opacity.pressed : 1,
             ...theme.elevation(3),
+            // Keeps the light-mode shadow, drops the dark-mode edge. The gold
+            // fill already separates this from the background at 8.46:1, so
+            // level 3's ring would only draw grey around the one element that
+            // never had a contrast problem — and eat 2pt of gold per side.
+            ...(theme.scheme === 'dark' ? { borderWidth: 0 } : {}),
           })}
         >
           <Animated.View style={{ transform: [{ rotate: spin }] }}>

@@ -270,8 +270,8 @@ export const FlowView = () => {
                 accessibilityLabel={option.label}
                 onPress={() => setChart(option.value)}
                 style={{
-                  width: 46,
-                  height: theme.touchTarget.min - 6,
+                  width: 48,
+                  height: theme.touchTarget.min,
                   alignItems: 'center',
                   justifyContent: 'center',
                   borderRadius: theme.radius.pill,

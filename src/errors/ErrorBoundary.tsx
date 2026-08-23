@@ -3,6 +3,9 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { loggerFor } from '@/logging';
 import { palette } from '@/theme/palette';
+// Plain module exports, not hook-gated — safe here even though `useTheme()` is
+// not, since a provider crash is exactly what this boundary catches.
+import { radius, spacing, touchTarget } from '@/theme/tokens';
 
 import { normalizeError, type AppError } from './AppError';
 
@@ -73,18 +76,18 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
-    gap: 12,
+    padding: spacing.xxl,
+    gap: spacing.md,
     backgroundColor: palette.ink[900],
   },
-  title: { color: '#f3f1ec', fontSize: 20, fontWeight: '700' },
-  body: { color: '#a9afb7', fontSize: 15, textAlign: 'center', lineHeight: 22 },
+  title: { color: palette.text.onInk, fontSize: 20, fontWeight: '700' },
+  body: { color: palette.text.onInkSecondary, fontSize: 15, textAlign: 'center', lineHeight: 22 },
   button: {
-    marginTop: 8,
-    minHeight: 44,
+    marginTop: spacing.sm,
+    minHeight: touchTarget.min,
     justifyContent: 'center',
-    paddingHorizontal: 20,
-    borderRadius: 10,
+    paddingHorizontal: spacing.xl,
+    borderRadius: radius.control,
     backgroundColor: palette.gold.primary,
   },
   buttonLabel: { color: palette.gold.onGold, fontSize: 16, fontWeight: '600' },

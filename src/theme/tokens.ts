@@ -63,7 +63,14 @@ const darkColors: ThemeColors = {
   chrome: palette.ink[900],
   chromeGlass: 'rgba(16, 16, 20, 0.78)',
   border: palette.ink.border,
-  borderStrong: '#3A3A44',
+  // Must stay visible on the OVERLAY plane, not just against `background`.
+  // A 60% black scrim composites `background` (#101014) down to ~#060608.
+  // Against that, the edge the FAB's fan actually rendered — `border` #2A2A32 —
+  // scored 1.42:1, and this token's own previous value #3A3A44 scored 1.80:1.
+  // Both sit below the 3:1 WCAG 1.4.11 floor for component boundaries, which is
+  // why those actions had no visible edge. #5F5F69 scores 3.21:1. Neutral grey
+  // by design: contrast here comes from luminance, never from a louder hue.
+  borderStrong: '#5F5F69',
 
   textPrimary: palette.text.onInk,
   textSecondary: palette.text.onInkSecondary,

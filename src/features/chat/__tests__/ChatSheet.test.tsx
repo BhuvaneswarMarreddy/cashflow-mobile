@@ -1,4 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
+import { StyleSheet } from 'react-native';
 
 import { AppError } from '@/errors';
 import { CATEGORIES } from '@/features/activity/categories';
@@ -643,6 +644,31 @@ describe('ChatSheet', () => {
       await waitFor(() => expect(getByTestId('chat-report')).toBeTruthy());
       expect(getByLabelText('Columns: Category, Spent')).toBeTruthy();
       expect(getByLabelText('Category: Groceries, Spent: 412.5')).toBeTruthy();
+    });
+
+    // RTL can't measure real layout (no yoga/native layout pass), so this
+    // can't assert the card actually hugs its rows on screen — that only
+    // shows up on a device or in a layout-capable env. What it CAN prove:
+    // the horizontal ScrollView carries the exact style override
+    // (`flexGrow: 0`) that undoes RN's own default `flexGrow: 1` on
+    // horizontal ScrollViews (see ScrollView.js's `baseHorizontal`) — the
+    // documented root cause of the card growing to fill the sheet instead
+    // of wrapping its content.
+    it('does not let the table scroller grow past its content height', async () => {
+      mockSend.mockResolvedValue({
+        action: 'report',
+        title: 'Spending by category',
+        columns: ['Category', 'Spent'],
+        rows: [['Groceries', 412.5]],
+      });
+      const { getByTestId } = await renderSheet();
+
+      await fireEvent.changeText(getByTestId('chat-input'), 'what did I spend on?');
+      await fireEvent.press(getByTestId('chat-send'));
+
+      await waitFor(() => expect(getByTestId('chat-report')).toBeTruthy());
+      const scrollStyle = StyleSheet.flatten(getByTestId('chat-report-scroll').props.style);
+      expect(scrollStyle.flexGrow).toBe(0);
     });
   });
 

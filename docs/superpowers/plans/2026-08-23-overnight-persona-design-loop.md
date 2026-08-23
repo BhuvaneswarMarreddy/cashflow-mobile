@@ -4,6 +4,15 @@
 
 **v2 (after plan review 1, rigor 6).** Changes: a real screenshot harness replaces code-only "visual" review; rigor levels are bound to required *evidence types* instead of adjectives; shared theme tokens get a collision rule; the loop log gets a real file; personas are seeded with the owner's literal complaints instead of rediscovering them; deploy blast radius is bounded; build number is bumped. Plan review 1's headline finding — that the `feedless` regression fixture is fabricated — was **verified false** (it exists at `cashflow-forecast/src/__tests__/feedless-card.test.ts`, `functions/src/__tests__/feedless-card.test.ts`, `src/__tests__/feedless-guard-wiring.test.ts`); the reviewer grepped only the mobile repo, where the plan lives. §6 now carries full paths so no future reader repeats that.
 
+**v3 (after plan review 2, rigor 9).** Two findings would have caused real damage and are fixed above: Tier-1 item 3 was **false** and is cut, and item 1's proposed fix would have violated a deliberate security decision and is struck. Process corrections adopted:
+
+- **The harness would have driven live production data.** `ENABLE_MOCK_API` is read in only two files (`src/data/index.ts`, `src/services/refresh.ts`) and covers **4 surfaces: accounts, activity, snapshot, plan.** Flow, Review, Chat, decisions, accountsWrite and csvImport call production `marreddy-cashflow` directly — including writes (`applyMerchantRule`, `createAccount`, `createBill`, `addCategory`, `importCsv`). The harness is already dead for lack of any input capability, but **it must never be revived without `EXPO_PUBLIC_FIREBASE_API_KEY=` and `EXPO_PUBLIC_FIREBASE_PROJECT_ID=` blanked**, which makes `isFirebaseConfigured()` false and every callable bail before the network.
+- **Loop ceiling is 2, not 5.** 5 × 90min plus triage, implementation, review, deploy and a device build does not fit the night. Budgeting time that does not exist means the rigor pass he explicitly asked for gets cut last. Two honest loops.
+- **The money gate is a command, not a smoke test.** `deploy.yml`'s smoke step is seven `curl` status checks and never touches `homeSnapshot` — every figure on his phone comes from a path the deploy gate does not exercise. The real gate is `cashflow-forecast/src/__tests__/flows.integration.test.ts`, which replays his real CSV export against `CSV_GROUND_TRUTH.md` and **skips itself in CI** because the CSVs are gitignored. Any money-path change runs it locally and pastes the pass line.
+- **An evidence tag must be a runnable command, not a word.** `GREPPED` ships the literal `git show origin/main:<path>` / `git grep -n … origin/main`; triage re-runs it and drops the finding if the output disagrees. The finder never implements its own finding.
+- **Morning report is 3 fields, not 11** (his standing preference is short replies): what changed on his phone, what number could have moved, what needs his hands.
+- Deploys skip doc-only merges already (`paths-ignore: '**/*.md', 'docs/**'`).
+
 ---
 
 ## 0. The evidence rule (new in v2, governs everything below)
@@ -147,9 +156,11 @@ Persona 2's #1 CRITICAL ("the deployed prompt never teaches add_category/rename_
 ## Ranked backlog (merged, de-duplicated)
 
 ### Tier 1 — wrong or dishonest output (jumps the queue)
-1. **"Nothing has changed since your last refresh" is a false negative** (P3). `previousSnapshot` is memory-only (financeStore.ts:19-24), so on any cold start the app reports "nothing changed" when it means "no baseline". For a 30-second-session user that is most opens. → Persist a last-seen snapshot, or say "no baseline yet".
+1. **"Nothing has changed since your last refresh" is a false negative** (P3). Symptom confirmed; mechanism corrected by plan review 2. Real chain: `firebaseRepositories.ts:216-231` reads `useFinanceStore.getState().snapshot` as "previous" — `null` on cold start; `changeDetection.ts:38` guards every delta behind `if (previous)`; `ChangeList.tsx:29-36` then prints "Nothing has changed since your last refresh."
+   → **Fix: distinguish no-baseline from no-change in the UI.** ~~Persist a last-seen snapshot~~ — **STRUCK. `financeStore.ts` states money is deliberately never written to device storage** ("would buy a slightly faster cold start in exchange for a durable copy of someone's finances sitting in a phone backup. Preferences persist; money does not"). Persisting it would put his balances in an iPhone backup to fix a copy bug. One file, no new persistence.
+   → Note: `mockRepositories.ts:28` returns a real `previous`, so a mock-mode screenshot **cannot** reproduce this. No "screenshot-verified" claim is possible here.
 2. **Dead "Record cash" button** (P1 + P3 independently). `HomeScreen.tsx:65-78` — the entire handler is an analytics call. Tapping does nothing.
-3. **CSV import silently flattens custom categories into 13 buckets** (P2). `csv-import.ts:243-259`; the original text survives only in `sourceCategory`, which **no UI anywhere reads**.
+3. ~~**CSV import silently flattens custom categories into 13 buckets** (P2).~~ **CUT — VERIFIED FALSE (plan review 2, confirmed independently).** `sourceCategory` is written verbatim (`cashflow-forecast/src/lib/csv-import.ts:521`, comment: *"kept verbatim so nothing gets flattened"*) and **is read by the callable the phone consumes**: `functions/src/snapshot.ts:262` — `category: transaction.sourceCategory ?? transaction.category`. Also read by flow-lanes, bills, ask, classify, fingerprint, importCsv. His Activity list already shows his own category text. Implementing this would have rewritten a working money path to fix nothing. **Same failure mode as §0 exists to prevent — a grep of the wrong repo — filed after §0 was written.**
 
 ### Tier 2 — blocks a persona's core job
 4. **No month-vs-month comparison anywhere** (P3). His literal question is unanswerable by any navigation path.
@@ -167,7 +178,7 @@ Persona 2's #1 CRITICAL ("the deployed prompt never teaches add_category/rename_
 
 ### Tier 4 — design system (designer)
 14. **FAB mini actions invisible** — root cause: dark-mode `elevation()` returns the same hairline for every level (theme.ts:40-55), so nothing can look more raised than anything else; and `surface` has no contrast headroom against the 60% scrim (~1.1:1, `MEASURED`). Fix: `surfaceAlt` + the defined-but-unused `borderStrong`, AND make dark elevation scale. **System-wide token change — triage sign-off per §4.**
-15. **36pt touch targets** in `SegmentedControl.tsx:58` (three daily screens) and 38pt in `FlowView.tsx:274` — below the app's own documented 44pt floor.
+15. **36pt touch targets** in `src/features/settings/SegmentedControl.tsx` (`touchTarget.min - 8`; path corrected by plan review 2 — it is NOT in `src/components/`) and 38pt in `FlowView.tsx:274` (`min - 6`) — below the app's own documented 44pt floor. Consumers: `ActivityScreen:51`, `AddAccountScreen:253`, `SettingsScreen:219`.
 16. **`heroNumber` used once, on the wrong screen**; `MetricCard size="hero"` renders at the same 22px as ordinary rows, so Plan and Accounts have no focal figure.
 17. **`StatusChip` uses `radius.control` where every sibling chip uses `radius.pill`.**
 18. **`ErrorBoundary` hardcodes spacing/radius and two DRIFTED hex colours** (#f3f1ec vs #F2EFE6) despite already importing the palette.

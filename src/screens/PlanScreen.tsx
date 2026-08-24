@@ -58,7 +58,17 @@ export const PlanScreen = () => {
   // 'service-unavailable'.
   if (lastError && !snapshot) {
     return (
-      <AppScreen testID="screen-plan">
+      // Same props as the main return below. Without `onRefresh` there is no
+      // RefreshControl, and ErrorState only draws "Try again" when the error is
+      // retryable — so an authentication or permission failure left this tab
+      // with no way out at all. Home and Accounts both keep their error state
+      // inside a refreshable screen; Plan was the only one that didn't.
+      <AppScreen
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        banner={<StatusBanner />}
+        testID="screen-plan"
+      >
         <ErrorState error={lastError} onRetry={() => triggerRefresh('tap')} />
       </AppScreen>
     );

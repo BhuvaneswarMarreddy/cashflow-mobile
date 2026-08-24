@@ -80,7 +80,14 @@ export const detectChanges = (
     }
   }
 
-  if (context.newTransactionCount > 0) {
+  // `previous &&`, same guard every other delta above sits behind. Without it a
+  // cold start reported the WHOLE first page as "N new transactions / Appeared
+  // since your last refresh" — the store is never persisted, so `knownIds` is
+  // empty and every fetched row looks new. Raising the activity page to 200
+  // quadrupled that false number, and it sat directly under a header that
+  // correctly said "Recent changes" because no baseline existed. The app
+  // contradicted itself in adjacent elements.
+  if (previous && context.newTransactionCount > 0) {
     changes.push({
       id: 'change-transactions',
       kind: 'new-transactions',

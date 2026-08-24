@@ -369,3 +369,28 @@ describe('the current category is marked', () => {
     expect(view.queryByLabelText('Food & Dining, current category')).toBeNull();
   });
 });
+
+/**
+ * Verification review, P3. Matching on label OR value is right for what the row
+ * displays, but custom categories dedupe on VALUE only — so a label typed as
+ * "rent" can sit beside the default whose value is "rent". Marking both would
+ * assert something false about where the money is counted; marking nothing is
+ * the honest answer.
+ */
+describe('an ambiguous current category', () => {
+  it('marks nothing rather than marking two categories', async () => {
+    useFinanceStore.setState({
+      categories: [
+        { value: 'rent', label: 'Rent', icon: '🏠' },
+        { value: 'rent-2', label: 'rent', icon: '🏠' },
+      ],
+    });
+
+    const view = await renderWithProviders(
+      <CategorizeSheet transaction={{ ...withMerchant, category: 'rent' }} onClose={jest.fn()} />,
+    );
+
+    expect(view.queryByLabelText('Rent, current category')).toBeNull();
+    expect(view.queryByLabelText('rent, current category')).toBeNull();
+  });
+});

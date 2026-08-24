@@ -28,6 +28,10 @@ export const Icon = ({ name, size = 20, color, label }: Props) => {
     <Feather
       name={name}
       size={size}
+      // Named after the glyph so a test can assert WHICH icon rendered. An
+      // icon often carries half a message — a green check next to "first look
+      // this session" reads as "all clear", which is the opposite of the truth.
+      testID={`icon-${name}`}
       color={color ?? theme.colors.textSecondary}
       accessibilityElementsHidden={label === undefined}
       importantForAccessibility={label === undefined ? 'no-hide-descendants' : 'yes'}

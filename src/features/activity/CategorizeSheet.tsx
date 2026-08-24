@@ -9,7 +9,12 @@ import { useFinanceStore } from '@/store/financeStore';
 import { useTheme } from '@/theme';
 import type { Transaction } from '@/types';
 
-import { iconFor, resolveCategories, selectableCategories, type CategoryOption } from './categories';
+import {
+  iconFor,
+  resolveCategories,
+  selectableCategories,
+  type CategoryOption,
+} from './categories';
 
 interface Props {
   /** null closes the sheet (BottomSheet's `visible` follows this). */
@@ -65,7 +70,26 @@ export const CategorizeSheet = ({ transaction, onClose }: Props) => {
   // categories never appear here for a NEW pick, except the transaction's own
   // current value — see `selectableCategories`.
   const storeCategories = useFinanceStore((financeState) => financeState.categories);
-  const categories = selectableCategories(resolveCategories(storeCategories), transaction?.category);
+  const categories = selectableCategories(
+    resolveCategories(storeCategories),
+    transaction?.category,
+  );
+
+  // Which option, if any, this row is already filed under.
+  //
+  // The server collapses its two fields into ONE wire string —
+  // `sourceCategory ?? category` (functions/src/snapshot.ts) — so the phone
+  // cannot tell a slug ("food") from a provider label ("Food & Dining"), and
+  // matching on `value` alone could never be true. Matching on either is right
+  // for what the row DISPLAYS, but it can be ambiguous: custom categories
+  // dedupe on value only, so a label typed as "rent" can sit beside the default
+  // whose value is "rent". Marking both would assert something false about
+  // where the money is counted, which is worse than marking nothing — so an
+  // ambiguous match marks nothing.
+  const currentMatches = categories.filter(
+    (option) => option.value === transaction?.category || option.label === transaction?.category,
+  );
+  const currentCategoryValue = currentMatches.length === 1 ? currentMatches[0].value : null;
 
   // Every reopen — including the same transaction long-pressed again after a
   // previous close — starts from the pick list, never the last run's "done".
@@ -193,16 +217,14 @@ export const CategorizeSheet = ({ transaction, onClose }: Props) => {
           ) : null}
           {categories.map((category, index) => {
             // The wire `category` is the server's `sourceCategory ?? category` — the
-              // provider's LABEL ("Food & Dining"), not a slug. Comparing it to
-              // `category.value` ("food") was never true, so the checkmark was
-              // unreachable by construction — and stayed unreachable after
-              // categorizing, since the rule writes the label into sourceCategory.
-              // The cost was not cosmetic: with no "already filed here" mark you
-              // re-tap, and `applyMerchantRule` writes a duplicate rule that
-              // truthfully reports "0 transactions re-tallied across 0 months".
-              const isCurrent =
-                category.value === transaction.category ||
-                category.label === transaction.category;
+            // provider's LABEL ("Food & Dining"), not a slug. Comparing it to
+            // `category.value` ("food") was never true, so the checkmark was
+            // unreachable by construction — and stayed unreachable after
+            // categorizing, since the rule writes the label into sourceCategory.
+            // The cost was not cosmetic: with no "already filed here" mark you
+            // re-tap, and `applyMerchantRule` writes a duplicate rule that
+            // truthfully reports "0 transactions re-tallied across 0 months".
+            const isCurrent = currentCategoryValue === category.value;
             return (
               <View key={category.value}>
                 {index > 0 ? <Divider inset={theme.spacing.lg} /> : null}

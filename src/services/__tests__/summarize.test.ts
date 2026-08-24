@@ -51,6 +51,7 @@ describe('summarizeRefresh', () => {
       snapshot: snapshot(),
       changes: [change(), change({ id: 'c2', kind: 'cash-decrease', amountCents: -12_800 })],
       now: NOW,
+      hasBaseline: true,
     });
 
     expect(draft.summary).toBe(
@@ -63,7 +64,7 @@ describe('summarizeRefresh', () => {
       change({ id: `c${index}`, kind: 'cash-decrease', amountCents: -1_000 * (index + 1) }),
     );
 
-    const draft = summarizeRefresh({ snapshot: snapshot(), changes: many, now: NOW });
+    const draft = summarizeRefresh({ snapshot: snapshot(), changes: many, now: NOW, hasBaseline: true });
     const sentences = draft.summary.split('. ').filter(Boolean);
 
     // two changes + runway + paycheck
@@ -71,7 +72,7 @@ describe('summarizeRefresh', () => {
   });
 
   it('says plainly when nothing moved', () => {
-    const draft = summarizeRefresh({ snapshot: snapshot(), changes: [], now: NOW });
+    const draft = summarizeRefresh({ snapshot: snapshot(), changes: [], now: NOW, hasBaseline: true });
     expect(draft.summary).toContain('Nothing has changed since your last refresh.');
     expect(draft.category).toBe('success');
   });
@@ -88,6 +89,7 @@ describe('summarizeRefresh', () => {
         }),
       ],
       now: NOW,
+      hasBaseline: true,
     });
 
     expect(draft.title).toBe('Something needs your attention');
@@ -101,6 +103,7 @@ describe('summarizeRefresh', () => {
       snapshot: snapshot({ runway: { ...snapshot().runway, hasBurn: false } }),
       changes: [],
       now: NOW,
+      hasBaseline: true,
     });
 
     expect(draft.summary).toContain("can't work out a runway yet");
@@ -112,6 +115,7 @@ describe('summarizeRefresh', () => {
       snapshot: snapshot({ cashCents: 100_000, upcomingTotalCents: 131_600 }),
       changes: [],
       now: NOW,
+      hasBaseline: true,
     });
 
     expect(draft.summary).toContain("$316 short of what's already committed");
@@ -120,7 +124,7 @@ describe('summarizeRefresh', () => {
 
 describe('summarizeMorning', () => {
   it('reports position without deltas', () => {
-    const draft = summarizeMorning({ snapshot: snapshot(), changes: [], now: NOW });
+    const draft = summarizeMorning({ snapshot: snapshot(), changes: [], now: NOW, hasBaseline: true });
     expect(draft.title).toBe('Morning update');
     expect(draft.summary).toBe(
       'Your accounts refreshed successfully. Your runway is 17 days. Your next paycheck is expected Friday, Aug 14.',
@@ -139,7 +143,7 @@ describe('summarizeFailure', () => {
 describe('toNotification', () => {
   it('starts unread and carries the correlation ID', () => {
     const notification = toNotification(
-      summarizeMorning({ snapshot: snapshot(), changes: [], now: NOW }),
+      summarizeMorning({ snapshot: snapshot(), changes: [], now: NOW, hasBaseline: true }),
       { source: 'refresh', correlationId: 'cf_9', now: NOW },
     );
 

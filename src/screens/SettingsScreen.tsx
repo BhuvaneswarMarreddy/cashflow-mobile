@@ -482,7 +482,7 @@ export const SettingsScreen = () => {
                 onPress={() => {
                   if (!snapshot) return;
                   notificationService.present(
-                    summarizeMorning({ snapshot, changes: [], now: Date.now() }),
+                    summarizeMorning({ snapshot, changes: [], now: Date.now(), hasBaseline: true }),
                     { source: 'developer' },
                   );
                 }}

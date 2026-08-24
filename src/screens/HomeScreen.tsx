@@ -55,6 +55,7 @@ export const HomeScreen = () => {
   const accounts = useFinanceStore((state) => state.accounts);
   // Distinguishes "no baseline yet" from "nothing changed" — see ChangeList.
   const previousSnapshot = useFinanceStore((state) => state.previousSnapshot);
+  const bills = useFinanceStore((state) => state.bills);
 
   const fabActions: FabAction[] = [
     {
@@ -164,7 +165,12 @@ export const HomeScreen = () => {
                 // exactly what MetricCard's own contract forbids: "$0 reads as
                 // a measured fact and is the single most expensive lie a money
                 // app can tell."
-                cents={snapshot.lockedMonthlyCents || null}
+                // `|| null` collapsed three different zeros into one. Only
+                // "no bills registered at all" is unknown; bills registered
+                // with none flagged non-negotiable — or whose non-negotiable
+                // ones have ended — is a genuine, measured $0 and should say
+                // so. The server asserts that zero in its own suite.
+                cents={bills.length === 0 ? null : snapshot.lockedMonthlyCents}
                 unavailableReason="Tell Cashflow about a bill and it will show here."
                 icon="lock"
                 footnote="a month, non-negotiable"

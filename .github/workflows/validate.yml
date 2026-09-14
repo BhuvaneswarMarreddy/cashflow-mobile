@@ -1,0 +1,48 @@
+# Every PR and every push to main runs `npm run verify` — until this file, the
+# 500+ tests only ran when someone remembered to.
+#
+# It never builds the app, never reads a secret and never talks to Firebase.
+name: validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      # The server deploys on every merge to cashflow-forecast main, with no phone
+      # release in step. Test against what is LIVE, not the copy committed here.
+      # A stale copy is a warning (commit the new one); a copy the phone cannot
+      # read fails the typecheck or src/contracts tests below.
+      - name: Use the server's current homeSnapshot contract
+        run: |
+          URL=https://raw.githubusercontent.com/BhuvaneswarMarreddy/cashflow-forecast/main/contracts/homeSnapshot.json
+          if curl -fsSL "$URL" -o "$RUNNER_TEMP/live.json"; then
+            if ! cmp -s "$RUNNER_TEMP/live.json" src/contracts/homeSnapshot.json; then
+              echo "::warning::cashflow-forecast main has a newer homeSnapshot contract. Testing against it; commit it with: curl -fsSL $URL -o src/contracts/homeSnapshot.json"
+              cp "$RUNNER_TEMP/live.json" src/contracts/homeSnapshot.json
+            fi
+          else
+            echo "::warning::Could not fetch the server contract from cashflow-forecast main; testing the committed copy."
+          fi
+
+      - run: npm run verify

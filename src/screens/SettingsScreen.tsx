@@ -22,12 +22,16 @@ import type { MoreStackParamList } from '@/navigation/types';
 import { triggerRefresh } from '@/hooks/useRefresh';
 import { setIncludePending } from '@/data/accountsWrite';
 import { authenticateLocally, biometricCapability } from '@/services/biometrics';
+import {
+  notificationsBlocked,
+  permissionState,
+  requestPermission,
+} from '@/services/deviceNotifications';
 import { notificationService } from '@/services/notifications';
 import { summarizeMorning } from '@/services/summarize';
 import { SCENARIO_IDS, SCENARIOS, type ScenarioId } from '@/mocks/scenarios';
 import { useDevStore } from '@/store/devStore';
 import { useFinanceStore } from '@/store/financeStore';
-import { useNotificationsStore } from '@/store/notificationsStore';
 import { useAuthStore } from '@/store/authStore';
 import { usePreferences } from '@/store/preferencesStore';
 import { useTheme, type ThemeMode } from '@/theme';
@@ -68,6 +72,50 @@ export const SettingsScreen = () => {
         void triggerRefresh('tap');
       })
       .finally(() => setPendingBusy(false));
+  };
+
+  // Whether iOS will actually deliver. A preference switch that says "on" while
+  // the OS refuses is the same lie as a figure with no data behind it.
+  const [notificationsAllowed, setNotificationsAllowed] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void permissionState().then((state) => {
+      if (alive) setNotificationsAllowed(state === 'granted');
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  /**
+   * Turning notifications ON asks iOS first.
+   *
+   * iOS shows its prompt only on the FIRST request ever; after that
+   * `requestPermissionsAsync` returns the previous answer with no UI. So a
+   * refusal here needs different words depending on whether the owner just
+   * declined or declined months ago — the second case is only fixable in the
+   * iOS Settings app, and saying "allow notifications" again would be useless.
+   */
+  const toggleNotifications = (value: boolean) => {
+    if (!value) {
+      changeSetting('notifications.enabled', () => setNotificationPreference('enabled', false));
+      return;
+    }
+    void requestPermission().then(async (state) => {
+      if (state === 'granted') {
+        setNotificationsAllowed(true);
+        changeSetting('notifications.enabled', () => setNotificationPreference('enabled', true));
+        return;
+      }
+      setNotificationsAllowed(false);
+      const blocked = await notificationsBlocked();
+      Alert.alert(
+        'iOS is not allowing notifications',
+        blocked
+          ? 'Notifications were turned off for Cashflow earlier. Turn them back on in iOS Settings → Notifications → Cashflow.'
+          : 'Cashflow needs permission before it can send anything.',
+      );
+    });
   };
 
   const user = useAuthStore((state) => state.user);
@@ -126,7 +174,6 @@ export const SettingsScreen = () => {
 
   const dev = useDevStore();
   const snapshot = useFinanceStore((state) => state.snapshot);
-  const unread = useNotificationsStore((state) => state.items.filter((item) => !item.read).length);
 
   const changeSetting = (key: string, apply: () => void) => {
     usageAnalytics.track('settings.changed', 'settings', { settingKey: key });
@@ -141,7 +188,7 @@ export const SettingsScreen = () => {
         >
           <LogoMark size={44} showWordmark />
           <AppText variant="caption" tone="textTertiary">
-            {appConfig.appVersion} · {appConfig.environment}
+            {appConfig.appVersion}
           </AppText>
         </View>
 
@@ -203,13 +250,13 @@ export const SettingsScreen = () => {
           <Card padded={false}>
             <SettingSwitch
               label="Allow notifications"
-              description="Turn everything off in one place"
-              value={notifications.enabled}
-              onValueChange={(value) =>
-                changeSetting('notifications.enabled', () =>
-                  setNotificationPreference('enabled', value),
-                )
+              description={
+                notificationsAllowed === false && notifications.enabled
+                  ? 'iOS is blocking these — turn them on in iOS Settings'
+                  : 'Cashflow will ask iOS the first time'
               }
+              value={notifications.enabled && notificationsAllowed !== false}
+              onValueChange={toggleNotifications}
               testID="switch-notifications"
             />
             <Divider inset={theme.spacing.lg} />
@@ -249,7 +296,7 @@ export const SettingsScreen = () => {
             <Divider inset={theme.spacing.lg} />
             <SettingSwitch
               label="Warnings"
-              description="Low safe-to-spend, sync problems"
+              description="Refresh failures and anything that needs attention"
               value={notifications.warnings}
               disabled={!notifications.enabled}
               onValueChange={(value) =>
@@ -349,20 +396,6 @@ export const SettingsScreen = () => {
           <SectionHeader title="Application" />
           <Card padded={false}>
             <ListRow title="Version" subtitle={appConfig.appVersion} leadingIcon="info" />
-            <Divider inset={theme.spacing.huge + theme.spacing.lg} />
-            <ListRow title="Environment" subtitle={appConfig.environment} leadingIcon="server" />
-            <Divider inset={theme.spacing.huge + theme.spacing.lg} />
-            <ListRow
-              title="Data source"
-              subtitle={flags.ENABLE_MOCK_API ? 'Mock scenarios' : appConfig.apiBaseUrl}
-              leadingIcon="database"
-            />
-            <Divider inset={theme.spacing.huge + theme.spacing.lg} />
-            <ListRow
-              title="Notifications received"
-              subtitle={`${unread} unread`}
-              leadingIcon="bell"
-            />
           </Card>
         </View>
 

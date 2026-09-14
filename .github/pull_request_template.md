@@ -9,7 +9,13 @@
 
 ## Evidence
 
-- [ ] `npm run verify` — typecheck, lint and tests green
+- [ ] `npm run verify` — typecheck, lint and tests green (CI runs it too)
+
+## Web
+
+<!-- One product, two repos. A feature is not done until both halves are live. -->
+
+- [ ] No web change needed, or its PR is linked: BhuvaneswarMarreddy/cashflow-forecast#
 - [ ] Ran on a real device (say which screen, and what it showed)
 - [ ] Native change? `npx expo prebuild -p ios` and a fresh build, not just a reload
 

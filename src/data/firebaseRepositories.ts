@@ -1,6 +1,7 @@
 import { httpsCallable } from '@firebase/functions';
 
 import { AppError } from '@/errors';
+import type { CategoryOption } from '@/features/activity/categories';
 import { loggerFor } from '@/logging';
 import { firebaseFunctions, isFirebaseConfigured } from '@/services/firebase';
 import { useFinanceStore } from '@/store/financeStore';
@@ -8,6 +9,7 @@ import { useFinanceStore } from '@/store/financeStore';
 import type { Repositories, SnapshotBundle } from './types';
 import type {
   Account,
+  BillDigest,
   FinancialSnapshot,
   Paycheck,
   SavingsGoal,
@@ -31,15 +33,63 @@ import type {
 
 const log = loggerFor('data');
 
-/** Exactly the payload `functions/src/snapshot.ts` returns. */
-interface SnapshotPayload {
+/** Exactly the payload `functions/src/snapshot.ts` returns — pinned against the
+ *  server's recorded sample by `src/contracts/__tests__/homeSnapshot.test.ts`. */
+export interface SnapshotPayload {
   generatedAt: string;
-  snapshot: Omit<FinancialSnapshot, 'generatedAt'>;
+  // `assumedMonthlySpendCents` is populated below, from the server's nested
+  // `snapshot.assumedMonthlySpend` — never sent pre-converted, same reason
+  // `generatedAt` is excluded.
+  snapshot: Omit<FinancialSnapshot, 'generatedAt' | 'assumedMonthlySpendCents'> & {
+    /**
+     * CHAT-SPEND-001 / FIN-SPEND-001: `settings.assumedMonthlySpend`, in
+     * DOLLARS — the one exception to this payload's integer-cents convention,
+     * because it is a pass-through of the raw settings value, not a derived
+     * figure. The server nests it inside `snapshot` beside `includePending`
+     * (both are policy fields the figures were derived under). Converted to
+     * cents once below, the same boundary `accountsWrite.ts`'s `toDollars`
+     * mirrors in reverse.
+     */
+    assumedMonthlySpend: number | null;
+  };
   accounts: Account[];
+  /**
+   * cashflow-mobile#24. The owner's resolved category set — defaults plus
+   * whatever they've added from chat, archived flag preserved. Always
+   * present; a top-level sibling of `bills`/`goals`/`accounts`, same as
+   * `functions/src/snapshot.ts`'s `buildSnapshot` returns it (NOT nested
+   * inside the `snapshot` object above).
+   */
+  categories: { value: string; label: string; icon?: string; archived?: boolean }[];
   upcoming: UpcomingPayment[];
+  /**
+   * CHAT-BILLS-001: the Bills register digest, for chat context and the
+   * (future) Upcoming feed. Arrives already in CENTS — the general payload
+   * rule (see `toCents` below); `assumedMonthlySpend` above is the one
+   * documented exception, being a raw settings passthrough, not a register.
+   */
+  bills: BillDigest[];
   goals: SavingsGoal[];
   activity: Transaction[];
 }
+
+const toCents = (dollars: number): number => Math.round(dollars * 100);
+
+/**
+ * Passes `icon`/`archived` through only when actually present — never
+ * synthesizes a fallback icon here. `iconFor()` (`@/features/activity/categories`)
+ * is the one place that happens, at render time, so a rename's write-back
+ * (`accountsWrite.ts`'s `customCategoriesOf`) never persists a made-up icon
+ * value that was never really there.
+ */
+const mapCategory = (
+  category: SnapshotPayload['categories'][number],
+): CategoryOption => ({
+  value: category.value,
+  label: category.label,
+  ...(category.icon ? { icon: category.icon } : {}),
+  ...(category.archived ? { archived: true } : {}),
+});
 
 /**
  * One refresh makes one network call.
@@ -168,7 +218,14 @@ export const createFirebaseRepositories = (): Repositories => ({
       const previous = useFinanceStore.getState().snapshot;
       const payload = await fetchSnapshot();
       return {
-        snapshot: { ...payload.snapshot, generatedAt: payload.generatedAt },
+        snapshot: {
+          ...payload.snapshot,
+          generatedAt: payload.generatedAt,
+          assumedMonthlySpendCents:
+            payload.snapshot.assumedMonthlySpend !== null
+              ? toCents(payload.snapshot.assumedMonthlySpend)
+              : null,
+        },
         // The server keeps no history, so "previous" is the last figure THIS
         // session held. On a cold start there is none and change detection
         // correctly reports nothing rather than inventing a delta.
@@ -179,8 +236,10 @@ export const createFirebaseRepositories = (): Repositories => ({
 
   plan: {
     upcoming: async () => (await fetchSnapshot()).upcoming,
+    bills: async () => (await fetchSnapshot()).bills,
     goals: async () => (await fetchSnapshot()).goals,
     nextPaycheck: async (): Promise<Paycheck | null> =>
       (await fetchSnapshot()).snapshot.nextPaycheck,
+    categories: async () => (await fetchSnapshot()).categories.map(mapCategory),
   },
 });

@@ -1,6 +1,8 @@
+import { CATEGORIES, type CategoryOption } from '@/features/activity/categories';
 import type {
   Account,
   AppNotification,
+  BillDigest,
   FinancialSnapshot,
   Paycheck,
   SavingsGoal,
@@ -29,6 +31,11 @@ export interface MockDataset {
   accounts: Account[];
   transactions: Transaction[];
   upcoming: UpcomingPayment[];
+  /** The Bills register digest — recurring definitions, not projected occurrences. */
+  bills: BillDigest[];
+  /** cashflow-mobile#24. Mock mode never models custom categories — always
+   *  the 13 defaults, exactly what a fresh owner's resolved set looks like. */
+  categories: CategoryOption[];
   goals: SavingsGoal[];
   paycheck: Paycheck | null;
   notifications: AppNotification[];
@@ -295,6 +302,11 @@ export const buildBaseDataset = (now: number): MockDataset => {
     },
   ];
 
+  const bills: BillDigest[] = [
+    { id: 'bill_electric', vendor: 'City Utilities', amountCents: 8_740, frequency: 'monthly', nonNegotiable: false, endDate: null, installmentsRemaining: null, method: null },
+    { id: 'bill_rent', vendor: 'Riverside Apartments', amountCents: 145_000, frequency: 'monthly', nonNegotiable: true, endDate: null, installmentsRemaining: null, method: null },
+  ];
+
   const goals: SavingsGoal[] = [
     {
       id: 'goal_emergency',
@@ -345,6 +357,7 @@ export const buildBaseDataset = (now: number): MockDataset => {
     lockedMonthlyCents: 257_514,
     avgMonthlySpendCents: 420_000,
     avgMonthlyIncomeCents: 520_000,
+    assumedMonthlySpendCents: null,
     lastBankSyncAt: isoTime(now, -18 * 60_000),
     includePending: false,
     nextPaycheck: paycheck,
@@ -370,6 +383,7 @@ export const buildBaseDataset = (now: number): MockDataset => {
     lockedMonthlyCents: 257_514,
     avgMonthlySpendCents: 420_000,
     avgMonthlyIncomeCents: 520_000,
+    assumedMonthlySpendCents: null,
     lastBankSyncAt: isoTime(now, -18 * 60_000),
     includePending: false,
     nextPaycheck: paycheck,
@@ -379,6 +393,8 @@ export const buildBaseDataset = (now: number): MockDataset => {
     accounts,
     transactions,
     upcoming,
+    bills,
+    categories: [...CATEGORIES],
     goals,
     paycheck,
     notifications: [],

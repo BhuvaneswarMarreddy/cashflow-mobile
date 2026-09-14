@@ -1,3 +1,5 @@
+import { CATEGORIES } from '@/features/activity/categories';
+
 import { buildBaseDataset, isoDate, isoTime, type MockDataset } from './dataset';
 
 /**
@@ -169,6 +171,8 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       accounts: [],
       transactions: [],
       upcoming: [],
+      bills: [],
+      categories: [...CATEGORIES],
       goals: [],
       paycheck: null,
       notifications: [],
@@ -193,6 +197,7 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
         lockedMonthlyCents: 0,
         avgMonthlySpendCents: 0,
         avgMonthlyIncomeCents: 0,
+        assumedMonthlySpendCents: null,
         lastBankSyncAt: null,
         includePending: false,
         nextPaycheck: null,

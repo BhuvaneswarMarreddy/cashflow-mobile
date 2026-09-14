@@ -67,6 +67,29 @@ export interface UpcomingPayment {
   autopay: boolean;
 }
 
+/** Mirrors the web's `BillFrequency` (src/lib/bills.ts) exactly — a closed set. */
+export type BillFrequency = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'semiannual' | 'annual';
+
+/**
+ * A recurring obligation from the Bills register — the RECURRING DEFINITION,
+ * not a projected occurrence (see `UpcomingPayment` for that). Chat context
+ * uses this to answer "what are my recurring payments" and to avoid proposing
+ * a `record_bill` duplicate.
+ */
+export interface BillDigest {
+  id: string;
+  vendor: string;
+  amountCents: number;
+  frequency: BillFrequency;
+  nonNegotiable: boolean;
+  /** ISO day the bill stops charging, or null — the "does it end?" answer. */
+  endDate: string | null;
+  /** Payments left on an installment plan, or null. Does not auto-decrement. */
+  installmentsRemaining: number | null;
+  /** Human label of the payment method ("Apple Card", "Manual / other"). */
+  method: string | null;
+}
+
 export interface Paycheck {
   /** ISO date. */
   expectedDate: string;
@@ -130,6 +153,15 @@ export interface FinancialSnapshot {
   lockedMonthlyCents: number;
   avgMonthlySpendCents: number;
   avgMonthlyIncomeCents: number;
+  /**
+   * CHAT-SPEND-001: the owner's own monthly-spend assumption, from
+   * `settings.assumedMonthlySpend`, in cents. `null` means no override — the
+   * runway above is the server's measured figure. When set, the server has
+   * already substituted it into `avgMonthlySpendCents` and the runway maths;
+   * this field exists only so the UI can mark that figure as an assumption,
+   * not a measurement.
+   */
+  assumedMonthlySpendCents: number | null;
   /**
    * When the banks were last actually reached (`meta/plaid.lastSuccess`).
    *

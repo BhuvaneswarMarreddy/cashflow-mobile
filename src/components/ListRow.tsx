@@ -16,6 +16,8 @@ interface Props {
   /** Right-hand content, usually an AmountText. */
   trailing?: ReactNode;
   onPress?: () => void;
+  /** Long-press action, e.g. the Activity row's "always categorize" menu. */
+  onLongPress?: () => void;
   accessibilityLabel?: string;
   accessibilityHint?: string;
   testID?: string;
@@ -29,6 +31,7 @@ export const ListRow = ({
   leadingTone = 'neutral',
   trailing,
   onPress,
+  onLongPress,
   accessibilityLabel,
   accessibilityHint,
   testID,
@@ -91,16 +94,23 @@ export const ListRow = ({
     </View>
   );
 
-  if (!onPress) return content;
+  if (!onPress && !onLongPress) return content;
+
+  // A row with only onLongPress (no onPress) has no visible affordance — the
+  // chevron is onPress-only, above — so a screen reader needs to be told the
+  // gesture exists at all.
+  const hint =
+    accessibilityHint ?? (!onPress && onLongPress ? 'Long press for options' : undefined);
 
   return (
     <Pressable
-      onPress={onPress}
+      {...(onPress ? { onPress } : {})}
+      {...(onLongPress ? { onLongPress } : {})}
       accessibilityRole="button"
       accessibilityLabel={
         accessibilityLabel ?? [title, subtitle, footnote].filter(Boolean).join(', ')
       }
-      {...(accessibilityHint !== undefined ? { accessibilityHint } : {})}
+      {...(hint !== undefined ? { accessibilityHint: hint } : {})}
       {...(testID !== undefined ? { testID } : {})}
       style={({ pressed }) => (pressed ? { backgroundColor: theme.colors.surfaceAlt } : null)}
     >

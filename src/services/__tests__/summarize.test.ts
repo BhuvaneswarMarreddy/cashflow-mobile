@@ -23,6 +23,7 @@ const snapshot = (overrides: Partial<FinancialSnapshot> = {}): FinancialSnapshot
   lockedMonthlyCents: 257_514,
   avgMonthlySpendCents: 420_000,
   avgMonthlyIncomeCents: 520_000,
+  assumedMonthlySpendCents: null,
   lastBankSyncAt: null,
   includePending: false,
   nextPaycheck: {
@@ -145,5 +146,36 @@ describe('toNotification', () => {
     expect(notification.read).toBe(false);
     expect(notification.correlationId).toBe('cf_9');
     expect(notification.timestamp).toBe('2026-08-09T12:00:00.000Z');
+  });
+});
+
+/**
+ * The card on Home was fixed first and this path was left behind: the same
+ * sentence also ships as a push notification, from the same empty-changes
+ * condition. A background refresh after the app is killed has no baseline and
+ * hit exactly that case — the app telling someone "nothing has changed" when
+ * it had nothing to compare against.
+ */
+describe('summarizeRefresh with no baseline', () => {
+  it('does not claim stillness when there was nothing to compare against', () => {
+    const draft = summarizeRefresh({
+      snapshot: snapshot(),
+      changes: [],
+      now: NOW,
+      hasBaseline: false,
+    });
+
+    expect(draft.summary).not.toMatch(/nothing has changed/i);
+  });
+
+  it('still says it when a baseline existed', () => {
+    const draft = summarizeRefresh({
+      snapshot: snapshot(),
+      changes: [],
+      now: NOW,
+      hasBaseline: true,
+    });
+
+    expect(draft.summary).toMatch(/nothing has changed/i);
   });
 });

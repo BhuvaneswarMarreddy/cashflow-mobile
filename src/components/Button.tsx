@@ -48,7 +48,7 @@ export const Button = ({
     secondary: {
       background: theme.colors.surfaceAlt,
       text: theme.colors.textPrimary,
-      border: theme.colors.border,
+      border: theme.colors.borderStrong,
     },
     ghost: { background: 'transparent', text: theme.colors.accent, border: 'transparent' },
     destructive: {

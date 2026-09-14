@@ -72,14 +72,27 @@ export const refreshFinancialData = async (
     });
   }
 
-  const [snapshotResult, accountsResult, activityResult, upcomingResult, goalsResult] =
-    await Promise.allSettled([
-      repositories.snapshot.current(),
-      repositories.accounts.list(),
-      repositories.activity.list({ limit: 50 }),
-      repositories.plan.upcoming(),
-      repositories.plan.goals(),
-    ]);
+  const [
+    snapshotResult,
+    accountsResult,
+    activityResult,
+    upcomingResult,
+    billsResult,
+    goalsResult,
+    categoriesResult,
+  ] = await Promise.allSettled([
+    repositories.snapshot.current(),
+    repositories.accounts.list(),
+    // The server already sends ACTIVITY_LIMIT = 200 and the slice happens on
+    // the device, so asking for 50 downloaded 200 rows and discarded 150. At a
+    // typical volume that is ~6 days of history instead of ~24, with no
+    // pagination anywhere — rows that fall out are gone from the phone.
+    repositories.activity.list({ limit: 200 }),
+    repositories.plan.upcoming(),
+    repositories.plan.bills(),
+    repositories.plan.goals(),
+    repositories.plan.categories(),
+  ]);
 
   const failedSections: FinanceSection[] = [];
   const errors: AppError[] = [];
@@ -107,7 +120,9 @@ export const refreshFinancialData = async (
   const accounts = collect('accounts', accountsResult);
   const transactions = collect('activity', activityResult);
   const upcoming = collect('plan', upcomingResult);
+  const bills = collect('plan', billsResult);
   const goals = collect('plan', goalsResult);
+  const categories = collect('plan', categoriesResult);
 
   // A failed bank sync is a PARTIAL refresh, not a clean one. The derivation
   // below still succeeds — it just re-derives yesterday's rows — so without this
@@ -164,6 +179,8 @@ export const refreshFinancialData = async (
     ...(accounts ? { accounts } : {}),
     ...(transactions ? { transactions } : {}),
     ...(upcoming ? { upcoming } : {}),
+    ...(bills ? { bills } : {}),
+    ...(categories ? { categories } : {}),
     ...(goals ? { goals } : {}),
     ...(snapshotBundle ? { paycheck: snapshotBundle.snapshot.nextPaycheck } : {}),
     changes,
@@ -215,7 +232,12 @@ export const refreshFinancialData = async (
       correlationId,
       source: trigger,
     });
-    const draft = summarizeRefresh({ snapshot, changes, now: clock.now() });
+    const draft = summarizeRefresh({
+      snapshot,
+      changes,
+      now: clock.now(),
+      hasBaseline: snapshotBundle ? snapshotBundle.previous !== null : true,
+    });
     const presented = notificationService.present(draft, { source: 'refresh', correlationId });
     summaryStage.succeeded({ kind: draft.category, delivered: presented !== null });
   }

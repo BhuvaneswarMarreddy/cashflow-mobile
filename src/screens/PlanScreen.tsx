@@ -7,6 +7,7 @@ import {
   Card,
   Divider,
   EmptyState,
+  ErrorState,
   ListRow,
   MetricCard,
   ProgressBar,
@@ -35,6 +36,7 @@ export const PlanScreen = () => {
   const goals = useFinanceStore((state) => state.goals);
   const status = useFinanceStore((state) => state.status);
   const hasLoadedOnce = useFinanceStore((state) => state.hasLoadedOnce);
+  const lastError = useFinanceStore((state) => state.lastError);
 
   if (!hasLoadedOnce && status === 'refreshing') {
     return (
@@ -43,6 +45,21 @@ export const PlanScreen = () => {
           <SkeletonCard lines={3} />
           <SkeletonCard lines={4} />
         </View>
+      </AppScreen>
+    );
+  }
+
+  // A failed load must NOT fall through to the body. Every empty branch below
+  // is phrased as a finding — "$0 due in the next 45 days", "No paycheck
+  // detected", "Nothing scheduled" — so a total failure rendered as the single
+  // most reassuring screen in the app: no bills, no paycheck, nothing
+  // committed. StatusBanner does not cover it either: a rejected homeSnapshot
+  // normalizes to 'unexpected', and the banner only reacts to 'network' and
+  // 'service-unavailable'.
+  if (lastError && !snapshot) {
+    return (
+      <AppScreen testID="screen-plan">
+        <ErrorState error={lastError} onRetry={() => triggerRefresh('tap')} />
       </AppScreen>
     );
   }
@@ -70,7 +87,11 @@ export const PlanScreen = () => {
               ? 'negative'
               : 'neutral'
           }
-          footnote={`Your cash, less the ${formatCurrency(snapshot?.upcomingTotalCents ?? 0)} due in the next 45 days`}
+          footnote={
+            snapshot
+              ? `Your cash, less the ${formatCurrency(snapshot.upcomingTotalCents)} due in the next 45 days`
+              : undefined
+          }
         />
 
         <View>

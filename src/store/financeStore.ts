@@ -1,8 +1,10 @@
 import { create } from 'zustand';
 
 import type { ErrorCategory } from '@/errors';
+import type { CategoryOption } from '@/features/activity/categories';
 import type {
   Account,
+  BillDigest,
   FinancialSnapshot,
   Paycheck,
   SavingsGoal,
@@ -38,6 +40,12 @@ interface FinanceState {
   accounts: Account[];
   transactions: Transaction[];
   upcoming: UpcomingPayment[];
+  bills: BillDigest[];
+  /** cashflow-mobile#24. The owner's resolved category set — `[]` until the
+   *  first snapshot lands; every consumer falls back to the 13 defaults via
+   *  `resolveCategories()` (`@/features/activity/categories`) rather than
+   *  reading this field directly. */
+  categories: CategoryOption[];
   goals: SavingsGoal[];
   paycheck: Paycheck | null;
   changes: SnapshotChange[];
@@ -57,6 +65,8 @@ interface FinanceState {
     accounts?: Account[];
     transactions?: Transaction[];
     upcoming?: UpcomingPayment[];
+    bills?: BillDigest[];
+    categories?: CategoryOption[];
     goals?: SavingsGoal[];
     paycheck?: Paycheck | null;
     changes?: SnapshotChange[];
@@ -74,6 +84,8 @@ const EMPTY = {
   accounts: [] as Account[],
   transactions: [] as Transaction[],
   upcoming: [] as UpcomingPayment[],
+  bills: [] as BillDigest[],
+  categories: [] as CategoryOption[],
   goals: [] as SavingsGoal[],
   paycheck: null,
   changes: [] as SnapshotChange[],
@@ -102,6 +114,8 @@ export const useFinanceStore = create<FinanceState>()((set) => ({
       accounts: result.accounts ?? state.accounts,
       transactions: result.transactions ?? state.transactions,
       upcoming: result.upcoming ?? state.upcoming,
+      bills: result.bills ?? state.bills,
+      categories: result.categories ?? state.categories,
       goals: result.goals ?? state.goals,
       paycheck: result.paycheck !== undefined ? result.paycheck : state.paycheck,
       changes: result.changes ?? state.changes,

@@ -80,7 +80,7 @@ export const AccountDetailScreen = () => {
             <AppText variant="sectionHeading" tone="textTertiary">
               {owed ? 'Balance owed' : 'Current balance'}
             </AppText>
-            <AmountText cents={account.balanceCents} variant="amount" tone="neutral" precise />
+            <AmountText cents={account.balanceCents} variant="heroNumber" tone="neutral" precise />
             <AppText variant="secondary" tone="textSecondary">
               {account.institution} · {accountKindLabel[account.kind]} · {formatMask(account.mask)}
             </AppText>
@@ -91,7 +91,10 @@ export const AccountDetailScreen = () => {
               {account.status === 'ok' ? (
                 <StatusChip label="Synced" tone="success" icon="check" />
               ) : account.status === 'stale' ? (
-                <StatusChip label="Out of date" tone="warning" icon="clock" />
+                // "Out of date" was a sync claim, and sat directly above a
+                // LastUpdated reading "2 minutes ago" — the card contradicted
+                // itself. The status means the balance has no opening anchor.
+                <StatusChip label="Balance unconfirmed" tone="warning" icon="help-circle" />
               ) : (
                 <StatusChip label="Sync failed" tone="error" icon="alert-triangle" />
               )}

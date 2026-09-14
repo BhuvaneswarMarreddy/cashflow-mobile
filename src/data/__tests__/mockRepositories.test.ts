@@ -1,3 +1,4 @@
+import { CATEGORIES } from '@/features/activity/categories';
 import { SCENARIOS } from '@/mocks/scenarios';
 import { useDevStore } from '@/store/devStore';
 
@@ -80,6 +81,11 @@ describe('mock repositories', () => {
     const upcoming = await mockRepositories.plan.upcoming();
     const dates = upcoming.map((payment) => payment.dueDate);
     expect([...dates].sort()).toEqual(dates);
+  });
+
+  it('cashflow-mobile#24: returns the 13 defaults for categories — mock mode never models custom ones', async () => {
+    const categories = await mockRepositories.plan.categories();
+    expect(categories).toEqual(CATEGORIES);
   });
 
   it('offers a scenario for every condition the UI has to handle', () => {

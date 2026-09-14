@@ -5,7 +5,7 @@ module.exports = [
   ...expoConfig,
   prettier,
   {
-    ignores: ['dist/*', '.expo/*', 'node_modules/*', 'coverage/*'],
+    ignores: ['dist/*', '.expo/*', 'node_modules/*', 'coverage/*', '.worktrees/*'],
   },
   {
     rules: {

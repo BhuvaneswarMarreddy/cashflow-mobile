@@ -53,6 +53,8 @@ export const HomeScreen = () => {
   const lastRefreshedAt = useFinanceStore((state) => state.lastRefreshedAt);
   const hasLoadedOnce = useFinanceStore((state) => state.hasLoadedOnce);
   const accounts = useFinanceStore((state) => state.accounts);
+  // Distinguishes "no baseline yet" from "nothing changed" — see ChangeList.
+  const previousSnapshot = useFinanceStore((state) => state.previousSnapshot);
 
   const fabActions: FabAction[] = [
     {
@@ -62,17 +64,11 @@ export const HomeScreen = () => {
       icon: 'refresh-cw',
       onPress: () => triggerRefresh('tap'),
     },
-    {
-      key: 'record-cash',
-      label: 'Record cash',
-      description: 'Not wired up yet — needs the backend',
-      icon: 'dollar-sign',
-      onPress: () =>
-        usageAnalytics.track('action.selected', 'home', {
-          target: 'record-cash',
-          outcome: 'cancelled',
-        }),
-    },
+    // "Record cash" lived here with an onPress that only fired analytics —
+    // a button that looked live and did nothing. Removed rather than left as a
+    // false promise: chat has no verb that can create a transaction either, so
+    // pointing it at Ask Cashflow would just be a different dead end.
+    // Real cash entry is filed as its own piece of work.
   ];
 
   const delta = (current: number | undefined, before: number | undefined): number | null =>
@@ -104,8 +100,17 @@ export const HomeScreen = () => {
             icon="pie-chart"
             title="Nothing to show yet"
             body="Connect an account and Cashflow will work out where you stand."
-            actionLabel="Refresh"
-            onAction={() => triggerRefresh('tap')}
+            // The button used to say "Refresh", which re-fetched the nothing
+            // that was already there — it contradicted the sentence above it
+            // and left a fresh install staring at a wall of $0.00 with no way
+            // forward. Send them where the copy already points.
+            actionLabel="Add an account"
+            onAction={() =>
+              navigation.navigate('Tabs', {
+                screen: 'AccountsTab',
+                params: { screen: 'AddAccount' },
+              })
+            }
           />
         )
       ) : (
@@ -124,6 +129,7 @@ export const HomeScreen = () => {
           <RunwayHero
             runway={snapshot.runway}
             avgMonthlySpendCents={snapshot.avgMonthlySpendCents}
+            isAssumedSpend={snapshot.assumedMonthlySpendCents !== null}
             onPress={() => {
               usageAnalytics.track('card.opened', 'home', { target: 'runway' });
               navigation.navigate('Tabs', { screen: 'Plan' });
@@ -151,7 +157,15 @@ export const HomeScreen = () => {
                   the non-negotiable monthly floor. */}
               <MetricCard
                 label="Locked"
-                cents={snapshot.lockedMonthlyCents}
+                // `|| null`, not the raw figure. This sums only bills flagged
+                // non-negotiable in the register, so a phone-only owner with no
+                // register sees 0 — and the card then asserts $0 of fixed
+                // monthly cost to someone paying rent and a car note. That is
+                // exactly what MetricCard's own contract forbids: "$0 reads as
+                // a measured fact and is the single most expensive lie a money
+                // app can tell."
+                cents={snapshot.lockedMonthlyCents || null}
+                unavailableReason="Tell Cashflow about a bill and it will show here."
                 icon="lock"
                 footnote="a month, non-negotiable"
                 onPress={() => {
@@ -218,7 +232,7 @@ export const HomeScreen = () => {
 
           <View>
             <SectionHeader
-              title="Since your last refresh"
+              title={previousSnapshot ? 'Since your last refresh' : 'Recent changes'}
               {...(changes.length > 0
                 ? {
                     actionLabel: 'Activity',
@@ -226,7 +240,7 @@ export const HomeScreen = () => {
                   }
                 : {})}
             />
-            <ChangeList changes={changes} />
+            <ChangeList changes={changes} hasBaseline={previousSnapshot !== null} />
           </View>
 
           {accounts.some((account) => account.status !== 'ok') ? (
@@ -242,7 +256,7 @@ export const HomeScreen = () => {
                       subtitle={
                         account.status === 'error'
                           ? "Cashflow couldn't reach this account"
-                          : 'This account has not synced recently'
+                          : 'Balance not confirmed by the bank — no opening figure on record'
                       }
                       leadingIcon="alert-triangle"
                       leadingTone="warning"

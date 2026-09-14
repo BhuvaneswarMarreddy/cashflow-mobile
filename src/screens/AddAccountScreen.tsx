@@ -132,7 +132,7 @@ export const AddAccountScreen = () => {
     borderRadius: theme.radius.control,
     backgroundColor: theme.colors.surfaceAlt,
     borderWidth: theme.borderWidth.hairline,
-    borderColor: theme.colors.border,
+    borderColor: theme.colors.borderStrong,
     color: theme.colors.textPrimary,
     ...theme.typography.body,
   };
@@ -183,7 +183,7 @@ export const AddAccountScreen = () => {
   };
 
   return (
-    <AppScreen testID="screen-add-account">
+    <AppScreen fabSource="accounts" testID="screen-add-account">
       <View style={{ gap: theme.spacing.xl }}>
         {plaidAvailable ? (
           <View>
@@ -379,7 +379,7 @@ export const AddAccountScreen = () => {
                       borderRadius: theme.radius.pill,
                       backgroundColor: selected ? theme.colors.accent : theme.colors.surfaceAlt,
                       borderWidth: theme.borderWidth.hairline,
-                      borderColor: selected ? theme.colors.accent : theme.colors.border,
+                      borderColor: selected ? theme.colors.accent : theme.colors.borderStrong,
                     }}
                   >
                     <AppText

@@ -20,16 +20,39 @@ const ICON_FOR: Record<SnapshotChange['kind'], IconName> = {
  * Severity is carried by an icon and by the wording, not by colour alone —
  * "one bill is due within 3 days" has to be legible as urgent in greyscale.
  */
-export const ChangeList = ({ changes }: { changes: readonly SnapshotChange[] }) => {
+export const ChangeList = ({
+  changes,
+  hasBaseline,
+}: {
+  changes: readonly SnapshotChange[];
+  /**
+   * Whether a previous snapshot existed to compare against. Balances are
+   * deliberately never persisted to device storage, so the baseline is only
+   * whatever THIS session already held — on a cold start there is none.
+   * Without this flag an empty list says "nothing has changed", which on the
+   * first open of the day is a claim the app cannot actually make.
+   *
+   * REQUIRED, with no default, on purpose: as an optional prop defaulting to
+   * true, deleting it at the call site silently restored the bug with every
+   * test still green. Now `tsc` catches that.
+   */
+  hasBaseline: boolean;
+}) => {
   const theme = useTheme();
 
   if (changes.length === 0) {
     return (
       <Card>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
-          <Icon name="check" size={16} color={theme.colors.positive} />
-          <AppText variant="secondary" tone="textSecondary">
-            Nothing has changed since your last refresh.
+          <Icon
+            name={hasBaseline ? 'check' : 'clock'}
+            size={16}
+            color={hasBaseline ? theme.colors.positive : theme.colors.textTertiary}
+          />
+          <AppText variant="secondary" tone="textSecondary" style={{ flex: 1 }}>
+            {hasBaseline
+              ? 'Nothing has changed since your last refresh.'
+              : 'First look this session. Refresh again and changes will show up here.'}
           </AppText>
         </View>
       </Card>

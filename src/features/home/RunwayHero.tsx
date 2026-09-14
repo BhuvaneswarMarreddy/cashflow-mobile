@@ -9,6 +9,13 @@ interface Props {
   runway: SnapshotRunway;
   /** Measured monthly burn — what the runway is divided by. */
   avgMonthlySpendCents: number;
+  /**
+   * CHAT-SPEND-001: true when `avgMonthlySpendCents` above is the owner's own
+   * stated assumption (`snapshot.assumedMonthlySpendCents`), not a measured
+   * figure. The caption must say so — an assumption presented as a
+   * measurement is the one thing this card cannot afford to get wrong.
+   */
+  isAssumedSpend: boolean;
   onPress?: () => void;
   testID?: string;
 }
@@ -28,7 +35,7 @@ interface Props {
  *    "6% of your reserve" is a score; "$1,400 buys your first month" is
  *    something to do this week.
  */
-export const RunwayHero = ({ runway, avgMonthlySpendCents, onPress, testID }: Props) => {
+export const RunwayHero = ({ runway, avgMonthlySpendCents, isAssumedSpend, onPress, testID }: Props) => {
   const theme = useTheme();
 
   const spoken = runway.hasBurn
@@ -61,9 +68,20 @@ export const RunwayHero = ({ runway, avgMonthlySpendCents, onPress, testID }: Pr
             {runway.label}
           </AppText>
 
+          {/*
+            "if no more money comes in" is the assumption the whole figure rests
+            on, and it was unstated. Runway divides cash by burn and never reads
+            income (cashflow-forecast src/lib/home.ts — `HomeSummaryInput` has no
+            income field at all), so for anyone earning more than they spend the
+            hero says the money runs out on a date while their own arithmetic
+            says it grows. Both readings are defensible; leaving the reader to
+            guess which one this is, is not. The same discipline already applies
+            to the assumed-spend note on the next line.
+          */}
           <AppText variant="caption" tone="textTertiary">
             Your cash lasts until {formatDate(runway.date, 'medium')} at{' '}
             {formatCurrency(avgMonthlySpendCents)} a month
+            {isAssumedSpend ? ' — your assumption' : ''}, if no more money comes in
           </AppText>
 
           <View style={{ gap: theme.spacing.xs, marginTop: theme.spacing.xs }}>

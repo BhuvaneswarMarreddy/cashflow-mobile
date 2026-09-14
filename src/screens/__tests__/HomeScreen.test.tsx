@@ -2,7 +2,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { buildBaseDataset } from '@/mocks/dataset';
 import { useFinanceStore } from '@/store/financeStore';
-import { renderWithProviders } from '@/test/render';
+import { fireEvent, renderWithProviders, waitFor } from '@/test/render';
 import { resetStores } from '@/test/stores';
 
 import { HomeScreen } from '../HomeScreen';
@@ -110,6 +110,22 @@ describe('HomeScreen', () => {
     expect(getByText('Try again')).toBeTruthy();
   });
 
+  it('says nothing about an assumption when the monthly figure is measured', async () => {
+    loaded();
+    const { getByTestId } = await renderHome();
+    expect(getByTestId('metric-runway')).not.toHaveTextContent('your assumption', { exact: false });
+  });
+
+  it("marks the monthly figure as the owner's own assumption when one is set", async () => {
+    loaded();
+    useFinanceStore.setState({
+      snapshot: { ...data.snapshot, assumedMonthlySpendCents: 900_000 },
+    });
+
+    const { getByTestId } = await renderHome();
+    expect(getByTestId('metric-runway')).toHaveTextContent('your assumption', { exact: false });
+  });
+
   it('never prints an unmeasured runway as zero days', async () => {
     loaded();
     useFinanceStore.setState({
@@ -119,6 +135,16 @@ describe('HomeScreen', () => {
     const { getByText, queryByTestId } = await renderHome();
     expect(getByText('Not measured yet')).toBeTruthy();
     expect(queryByTestId('metric-runway-value')).toBeNull();
+  });
+
+  it('opens the chat sheet from the "Ask Cashflow" quick action', async () => {
+    loaded();
+    const { getByLabelText, getByTestId } = await renderHome();
+
+    await fireEvent.press(getByLabelText('Quick actions'));
+    await fireEvent.press(getByTestId('fab-action-ask-ai'));
+
+    await waitFor(() => expect(getByTestId('chat-input')).toBeTruthy());
   });
 
   it('surfaces accounts that failed to sync', async () => {

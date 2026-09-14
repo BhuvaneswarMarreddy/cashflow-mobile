@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cashflow",
     "slug": "cashflow-mobile",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "cashflow",
@@ -11,12 +11,16 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
+      "buildNumber": "4",
       "bundleIdentifier": "com.marreddy.cashflow",
       "googleServicesFile": "./GoogleService-Info.plist",
       "appleTeamId": "TD86T4GJN3",
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "Cashflow loads its JavaScript from the Metro development server on your local network. Release builds do not use the local network.",
-        "NSBonjourServices": ["_expo._tcp", "_http._tcp"]
+        "NSBonjourServices": [
+          "_expo._tcp",
+          "_http._tcp"
+        ]
       }
     },
     "android": {
@@ -58,6 +62,12 @@
         "@react-native-google-signin/google-signin",
         {
           "iosUrlScheme": "com.googleusercontent.apps.958007946272-omhu1ra8tbajbceai8nrk2q99a8k0rp3"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Cashflow reads the screenshot you drop into the chat. Photos never leave your device except to answer that message."
         }
       ]
     ]

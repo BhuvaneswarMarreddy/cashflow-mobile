@@ -77,7 +77,7 @@ export const MetricCard = ({
         <>
           <AmountText
             cents={cents}
-            variant={hero ? 'amount' : 'amountSmall'}
+            variant={hero ? 'heroNumber' : 'amountSmall'}
             tone={tone}
             testID={testID ? `${testID}-amount` : undefined}
           />

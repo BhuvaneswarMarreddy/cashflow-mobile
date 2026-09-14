@@ -40,7 +40,24 @@ export interface Theme {
 const shadowFor = (scheme: ColorScheme, level: ElevationLevel, colors: ThemeColors): ViewStyle => {
   if (level === 0) return {};
   if (scheme === 'dark') {
-    return { borderWidth: borderWidth.hairline, borderColor: colors.border };
+    // Depth on ink is a lighter edge rather than a shadow, so the edge has to
+    // scale with `level` the way the shadow does on paper. Returning one
+    // hairline for every level made every rung pixel-identical — nothing in
+    // dark mode could look more raised than anything else.
+    //
+    // Level 1 is EVERY Card in the app. It used `border` (#2A2A32), which is
+    // 1.33:1 against the page and 1.22:1 against its own fill — and the fills
+    // themselves span only 1.10:1. A card was therefore separated from the
+    // page by about 1.3:1 in total: the literal "everything blends into the
+    // background". `border` stays what it is good at — a divider INSIDE a
+    // surface, where low contrast is correct and decorative. An OUTLINE, the
+    // thing WCAG 1.4.11 actually measures, now uses `borderStrong`.
+    //
+    // Level 3 has no dark consumer: its only caller is the FAB's gold toggle,
+    // which opts out (its fill is already 8.46:1). Kept equal to level 2
+    // rather than invented, so no one reads a distinction that never renders.
+    if (level === 1) return { borderWidth: borderWidth.hairline, borderColor: colors.borderStrong };
+    return { borderWidth: borderWidth.thick, borderColor: colors.borderStrong };
   }
   const depth = { 1: 2, 2: 6, 3: 14 }[level];
   return Platform.select<ViewStyle>({

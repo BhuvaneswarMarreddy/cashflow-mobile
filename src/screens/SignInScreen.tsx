@@ -11,7 +11,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { authService } from '@/api/auth';
 import { AppText, Button, Divider, GoogleButton, Icon, LogoMark } from '@/components';
-import { appConfig } from '@/config';
 import { useAuthStore } from '@/store/authStore';
 import { useTheme } from '@/theme';
 
@@ -51,7 +50,7 @@ export const SignInScreen = () => {
     borderRadius: theme.radius.control,
     backgroundColor: theme.colors.surfaceAlt,
     borderWidth: theme.borderWidth.hairline,
-    borderColor: theme.colors.border,
+    borderColor: theme.colors.borderStrong,
     color: theme.colors.textPrimary,
     ...theme.typography.body,
   };
@@ -218,9 +217,6 @@ export const SignInScreen = () => {
           />
         </View>
 
-        <AppText variant="caption" tone="textTertiary" align="center">
-          {appConfig.environment} · {appConfig.appVersion}
-        </AppText>
       </ScrollView>
     </KeyboardAvoidingView>
   );

@@ -55,7 +55,7 @@ export const SegmentedControl = <T extends string>({
             accessibilityLabel={option.label}
             style={({ pressed }) => ({
               flex: 1,
-              minHeight: theme.touchTarget.min - 8,
+              minHeight: theme.touchTarget.min,
               alignItems: 'center',
               justifyContent: 'center',
               borderRadius: theme.radius.control,

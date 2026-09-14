@@ -33,8 +33,9 @@ import type {
 
 const log = loggerFor('data');
 
-/** Exactly the payload `functions/src/snapshot.ts` returns. */
-interface SnapshotPayload {
+/** Exactly the payload `functions/src/snapshot.ts` returns — pinned against the
+ *  server's recorded sample by `src/contracts/__tests__/homeSnapshot.test.ts`. */
+export interface SnapshotPayload {
   generatedAt: string;
   // `assumedMonthlySpendCents` is populated below, from the server's nested
   // `snapshot.assumedMonthlySpend` — never sent pre-converted, same reason

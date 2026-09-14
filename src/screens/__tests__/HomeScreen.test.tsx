@@ -27,6 +27,10 @@ const loaded = () =>
     accounts: data.accounts,
     transactions: data.transactions,
     upcoming: data.upcoming,
+    // Locked reads as "not available" with an empty register — a phone-only
+    // owner with no bills has no measured non-negotiable spend. The figure
+    // itself is only meaningful once bills exist.
+    bills: data.bills,
     goals: data.goals,
     changes: [],
     status: 'success',

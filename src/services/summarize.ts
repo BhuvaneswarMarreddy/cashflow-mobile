@@ -31,7 +31,7 @@ export interface SummaryInput {
    * saying "nothing has changed" then is a claim the app cannot make. A
    * background refresh after the app is killed hits exactly that case.
    */
-  hasBaseline?: boolean;
+  hasBaseline: boolean;
 }
 
 export interface SummaryDraft {
@@ -100,7 +100,7 @@ const changeSentence = (change: SnapshotChange): string => {
  * and starts being a report, and a report belongs in the app.
  */
 export const summarizeRefresh = (input: SummaryInput): SummaryDraft => {
-  const { snapshot, changes, now, hasBaseline = true } = input;
+  const { snapshot, changes, now, hasBaseline } = input;
   const urgent = changes.find((change) => change.severity === 'warning');
   const headline = changes.slice(0, 2).map(changeSentence);
 

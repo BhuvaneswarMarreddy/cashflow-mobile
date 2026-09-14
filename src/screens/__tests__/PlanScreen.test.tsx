@@ -54,6 +54,34 @@ describe('PlanScreen when the load failed', () => {
     expect(view.getByText(/something went wrong/i)).toBeTruthy();
   });
 
+  /**
+   * The guard is `lastError && !snapshot`, and this is the half that pins the
+   * `!snapshot` clause. Weakening it to `lastError` alone would discard good
+   * cached data on any failed background refresh — and the two tests above
+   * both pass with that regression in place.
+   */
+  it('keeps showing cached figures when a later refresh fails', async () => {
+    const data = buildBaseDataset(NOW);
+    useFinanceStore.setState({
+      hasLoadedOnce: true,
+      status: 'failed',
+      snapshot: data.snapshot,
+      upcoming: data.upcoming,
+      goals: data.goals,
+      lastError: {
+        category: 'network',
+        userMessage: 'Cashflow could not reach the network.',
+        retryable: true,
+        correlationId: null,
+      },
+    });
+
+    const view = await renderPlan();
+
+    expect(view.queryByText(/could not reach the network/i)).toBeNull();
+    expect(view.getByTestId('screen-plan')).toBeTruthy();
+  });
+
   it('still renders the plan normally when the load succeeded', async () => {
     const data = buildBaseDataset(NOW);
     useFinanceStore.setState({

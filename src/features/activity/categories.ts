@@ -76,12 +76,26 @@ export const selectableCategories = (
   currentValue?: string,
 ): readonly CategoryOption[] => {
   const assignable = categories.filter((category) => !category.archived);
-  if (!currentValue || assignable.some((category) => category.value === currentValue)) {
+  if (!currentValue || assignable.some((category) => isCategory(category, currentValue))) {
     return assignable;
   }
-  const current = categories.find((category) => category.value === currentValue);
+  const current = categories.find((category) => isCategory(category, currentValue));
   return current ? [...assignable, current] : assignable;
 };
+
+/**
+ * Does this option describe the row's current category?
+ *
+ * The server collapses two fields into ONE wire string — `sourceCategory ??
+ * category` (functions/src/snapshot.ts) — so the phone receives either a slug
+ * ("food") or a provider label ("Food & Dining") and cannot tell which.
+ * Matching on `value` alone was never true for an imported row, which silently
+ * killed the archived-category carve-out above: a row filed under a
+ * just-removed category showed no option matching its own value, reading as
+ * "nothing chosen" rather than the truth.
+ */
+export const isCategory = (option: CategoryOption, wireCategory: string): boolean =>
+  option.value === wireCategory || option.label === wireCategory;
 
 /**
  * label -> a slug (`[a-z0-9-]{1,32}`), collision-safe against `taken` (the

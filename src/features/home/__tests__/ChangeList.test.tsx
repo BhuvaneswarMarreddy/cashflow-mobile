@@ -15,6 +15,12 @@ describe('ChangeList with no changes', () => {
 
     expect(view.queryByText(/nothing has changed/i)).toBeNull();
     expect(view.getByText(/first look this session/i)).toBeTruthy();
+    // The green check is the non-text half of the claim: it reads as "all
+    // clear" at a glance, which is exactly what a missing baseline is not.
+    // `hidden: true` — the icon is deliberately accessibility-hidden (the text
+    // beside it says the same thing), and RNTL skips those by default.
+    expect(view.queryByTestId('icon-check', { hidden: true })).toBeNull();
+    expect(view.getByTestId('icon-clock', { hidden: true })).toBeTruthy();
   });
 
   it('says nothing changed only when it actually compared against something', async () => {

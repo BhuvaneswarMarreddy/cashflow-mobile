@@ -83,11 +83,23 @@ describe('detectChanges', () => {
     expect(changes).toHaveLength(0);
   });
 
-  it('produces nothing but new-transaction news when there is no history', () => {
+  /**
+   * With no previous snapshot there is nothing to have "appeared SINCE" — the
+   * store is never persisted, so on a cold start `knownIds` is empty and every
+   * fetched row looks new. This used to report the whole first page as "N new
+   * transactions / Appeared since your last refresh"; at a 200-row page that is
+   * a loud, confident falsehood on the first open of the day.
+   */
+  it('claims no new transactions when there is no baseline to compare against', () => {
     const changes = detectChanges(snapshot(), null, context({ newTransactionCount: 2 }));
 
-    expect(changes).toHaveLength(1);
-    expect(changes[0]?.label).toBe('2 new transactions');
+    expect(changes).toHaveLength(0);
+  });
+
+  it('reports new transactions once a baseline exists', () => {
+    const changes = detectChanges(snapshot(), snapshot(), context({ newTransactionCount: 2 }));
+
+    expect(changes.map((c) => c.label)).toContain('2 new transactions');
   });
 
   it('warns about a bill due within three days when it is not on autopay', () => {
